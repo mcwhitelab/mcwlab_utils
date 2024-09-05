@@ -1,7 +1,7 @@
 from transformers import AutoTokenizer, AutoModel, AutoConfig, T5Tokenizer, T5EncoderModel
 
 
-from transformer_infrastructure.pca_embeddings import control_pca, load_pcamatrix, apply_pca
+from pca_embeddings import control_pca, load_pcamatrix, apply_pca
 import torch
 import torch.nn as nn
 from Bio import SeqIO
@@ -117,7 +117,7 @@ def get_embed_args():
     
     return(args)
 
-sequence_lols = parse_fasta(args.fasta_path, fasta_tbl, True, maxlength)
+# sequence_lols = parse_fasta(args.fasta_path, fasta_tbl, True, maxlength)
 
 def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 1):
    ''' 
