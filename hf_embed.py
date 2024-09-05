@@ -1,7 +1,8 @@
 from transformers import AutoTokenizer, AutoModel, AutoConfig, T5Tokenizer, T5EncoderModel
 
+from pca_embeddings import control_pca, load_pcamatrix, apply_pca
+
 from transformers.models.t5.modeling_t5 import T5LayerFF
-from vcmsa.pca_embeddings import control_pca, load_pcamatrix, apply_pca
 import torch
 import torch.nn as nn
 from Bio import SeqIO
@@ -127,7 +128,11 @@ def get_embed_args():
     
     return(args)
 
-def parse_fasta_for_embed(fasta_path, truncate = None, padding = 5, minlength = 1):
+
+# sequence_lols = parse_fasta(args.fasta_path, fasta_tbl, True, maxlength)
+
+def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 1):
+
    ''' 
    Load a fasta of protein sequences and
      add a space between each amino acid in sequence (needed to compute embeddings)
