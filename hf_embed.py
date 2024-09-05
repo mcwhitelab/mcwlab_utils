@@ -13,6 +13,9 @@ import gc
 import time
 
 '''
+
+## Note, this script is ready for reorganization into smaller functions
+
 Get pickle of embeddings for a fasta of protein sequences
 with a huggingface transformer model
 
