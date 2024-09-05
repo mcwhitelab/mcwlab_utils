@@ -1,7 +1,8 @@
 from transformers import AutoTokenizer, AutoModel, AutoConfig, T5Tokenizer, T5EncoderModel
 
-
 from pca_embeddings import control_pca, load_pcamatrix, apply_pca
+
+from transformers.models.t5.modeling_t5 import T5LayerFF
 import torch
 import torch.nn as nn
 from Bio import SeqIO
@@ -9,10 +10,13 @@ import pickle
 import argparse
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-
+import gc
 import time
 
 '''
+
+## Note, this script is ready for reorganization into smaller functions
+
 Get pickle of embeddings for a fasta of protein sequences
 with a huggingface transformer model
 
@@ -76,7 +80,8 @@ model.save_pretrained(outdir)
 #### Minimal anaconda environment
 conda create --name hf-transformers -c conda-forge -c pytorch transformers pytorch::pytorch numpy biopython
 
-McWhiteLab
+Claire D. McWhite
+7/8/20
 '''
 
 def get_embed_args():
@@ -94,8 +99,13 @@ def get_embed_args():
                         help="Flag: Whether to get sequence embeddings")
     parser.add_argument("-a", "--get_aa_embeddings", dest = "get_aa_embeddings", action = "store_true",
                         help="Flag: Whether to get amino-acid embeddings")
-    parser.add_argument("-p", "--padding", dest = "padding", type = int, default = 10,
-                        help="Add if using unaligned sequence fragments (to reduce first and last character effects). Add n X's to start and end of sequencesPotentially not needed for sets of complete sequences or domains that start at the same character, default: 10")
+
+    parser.add_argument("-sa", "--get_sequence_activations", dest = "get_sequence_activations", action = "store_true",
+                        help="Flag: Whether to get sequence activations")
+    parser.add_argument("-aa", "--get_aa_activations", dest = "get_aa_activations", action = "store_true",
+                        help="Flag: Whether to get amino-acid activations")
+    parser.add_argument("-p", "--padding", dest = "padding", type = int, default = 0,
+                        help="Add if using unaligned sequence fragments (to reduce first and last character effects). Add n X's to start and end of sequencesPotentially not needed for sets of complete sequences or domains that start at the same character, default: 0")
     parser.add_argument("-t", "--truncate", dest = "truncate", type = int, required = False,
                         help= "Optional: Truncate all sequences to this length")
     parser.add_argument("-ad", "--aa_target_dim", dest = "aa_target_dim", type = int, required = False,
@@ -107,19 +117,22 @@ def get_embed_args():
     parser.add_argument("-sm", "--sequence_pcamatrix_pkl", dest = "sequence_pcamatrix_pkl", type = str, required = False,
                         help= "Optional: Use a pretrained PCA matrix to reduce dimensions of amino acid embeddings (pickle file with objects pcamatrix and bias")
     parser.add_argument("-r", "--use_ragged_arrays", dest = "ragged_arrays", action = "store_true", required = False,
-                        help= "Optional: Use package 'awkward' to save ragged arrays fo amino acid embeddings")
+                        help= "Optional: Use package 'awkward' to save ragged arrays fo amino acid embeddings (not implemented)")
     parser.add_argument("-l", "--layers", dest = "layers", nargs="+", type=int, required = False,
                         help="Additionally exclude outlier sequences from final alignment")
     parser.add_argument("-hds", "--heads", dest = "heads", required = False,
                         help="Additionally exclude outlier sequences from final alignment")
-
+    parser.add_argument("-co", "--cpu_only", dest = "cpu_only",  action = "store_true",
+                        help="If --cpu_only flag is included, will run on cpu even if gpu available")
     args = parser.parse_args()
     
     return(args)
 
+
 # sequence_lols = parse_fasta(args.fasta_path, fasta_tbl, True, maxlength)
 
 def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 1):
+
    ''' 
    Load a fasta of protein sequences and
      add a space between each amino acid in sequence (needed to compute embeddings)
@@ -180,6 +193,7 @@ def mean_pooling(model_output, attention_mask):
     '''
     token_embeddings = model_output[0] #First element of model_output contains all token embeddings
     print("token_embeddings_size", token_embeddings.size())
+    #print("token_embeddings_dtype", token_embeddings.dtype))
     input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
     sum_embeddings = torch.sum(token_embeddings * input_mask_expanded, 1)
     sum_mask = torch.clamp(input_mask_expanded.sum(1), min=1e-9)
@@ -286,7 +300,7 @@ def retrieve_aa_embeddings(model_output, model_type, layers = None, padding = 0,
     if model_type == "bert":
       front_trim = 1 + padding
       end_trim = 1 + padding
-    elif model_type == "t5":
+    elif model_type == "t5" or model_type == "gpt2":
       front_trim = 0 + padding
       end_trim = 1 + padding
     else:
@@ -312,7 +326,6 @@ def load_model(model_path, output_hidden_states = True, output_attentions = Fals
 
     print("load tokenizer")
     print("load_model:model_path", model_path)
-
     if model_type == "t5":
         print("T5 model")
         tokenizer = T5Tokenizer.from_pretrained(model_path)
@@ -328,8 +341,14 @@ def load_model(model_path, output_hidden_states = True, output_attentions = Fals
                        output_hidden_states=output_hidden_states, 
                        output_attentions = output_attentions)
 
+    if model_type == "gpt2":
+         # This needs to be checked before using
+         tokenizer.pad_token = tokenizer.eos_token
     if half == True:
         model.half() # Put model in half precision mode for faster embedding
+
+    print(model)
+    print(model_config)
 
     if return_config == True:
        return(model, tokenizer, model_config)
@@ -363,9 +382,19 @@ class ListDataset(Dataset):
         return len(self.data)
 
 
+"""
+
+T5DenseActDense(
+  (wi): Linear(in_features=512, out_features=2048, bias=False)
+  (wo): Linear(in_features=2048, out_features=512, bias=False)
+  (dropout): Dropout(p=0.1, inplace=False)
+  (act): ReLU()
+
+"""
 
 
-def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, get_aa_embeddings = True, padding = 5, ragged_arrays = False, aa_pcamatrix_pkl = None, sequence_pcamatrix_pkl = None, heads = None, layers = None, strat="meansig"):
+
+def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, get_aa_embeddings = True, get_sequence_activations = False, get_aa_activations = False, padding = 0, ragged_arrays = False, aa_pcamatrix_pkl = None, sequence_pcamatrix_pkl = None, heads = None, layers = None, strat="meansig", cpu_only = False, half = False):
     '''
     Encode sequences with a transformer model
 
@@ -380,7 +409,18 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
        ak.numba.register()
     print("CUDA available?", torch.cuda.is_available())
 
-    model, tokenizer, model_config = load_model(model_path, return_config = True)
+    # half precision doesn't work on CPU 
+    if not torch.cuda.is_available():
+        half = False
+    else:
+        half = True
+   
+
+    if get_aa_embeddings == True or get_sequence_embeddings == True:
+         output_hidden_states = True
+    else:
+         output_hidden_states = False
+    model, tokenizer, model_config = load_model(model_path, output_hidden_states = output_hidden_states, return_config = True, half = half)
     model_type = model_config.model_type
     print("This is a {} model".format(model_type))
     print("Model loaded")
@@ -389,12 +429,90 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
     print("device", device) 
     device_ids =list(range(0, torch.cuda.device_count()))
     print("device_ids", device_ids)
-    if torch.cuda.device_count() > 1:
+ 
+   
+    hooked_activations = []
+    # If needed, this can be turned in a nested dictionary
+    # Saving all aa activations across layers = lots of space
+    # If not needed, only save sequence activations. i.e. sum across aa activations
+    def hook_aa(module, input, output):
+        # The hooked values are appended to the 'hooked_activations' list.
+        #output = torch.where(output == float('-inf'), torch.zeros_like(output), output)
+        #print(output[:,:,:3])
+        #hooked_activations.append(output[:,:,:3].cpu())  # Just first 3 neurons for testing
+        hooked_activations.append(output.cpu())
+        # Each output is a list of activations per token. then passing through each layer. 
+
+        # Each layer of t5-small (6) is 2048 long (goes from 512 -> 2048 -> 512)
+        # First loop through layers (ex. 6 layers)
+
+    # If only doing sequence activations, use this one
+    def hook_seq(module, input, output):
+       
+        #print("min", torch.min(output))
+        # The hooked values are appended to the 'hooked_activations' list.
+        #output = torch.where(output == float('-inf'), torch.zeros_like(output), output)
+
+        # Important to convert to float32 before summing, otherwise overflow errors from values < -65504
+        fxn = "max"
+        if fxn == "sum":
+            hooked_activations.append(torch.sum(output.float(), dim = 1).cpu()) # Sum scales with sequence length obviously
+        elif fxn == "max":
+
+            max_values, _ = torch.max(output.float(), dim=1)  # Extracting max values
+            hooked_activations.append(max_values.cpu())
+
+        elif fxn == "min":
+
+            max_values, _ = torch.min(output.float(), dim=1)  # Extracting min values
+            hooked_activations.append(max_values.cpu())
+
+   
+
+        # Each layer of t5-small (6) is 2048 long (goes from 512 -> 2048 -> 512)
+        # First loop through layers (ex. 6 layers)
+
+    # Set up aa_actiation hook
+    if get_aa_activations == True:
+        if  model_type == "t5":
+            for block in model.encoder.block:
+               # Then loop through components (attn, ff) of the layer
+               for x in block.layer:
+                   if isinstance(x, T5LayerFF) :
+                       x.DenseReluDense.wi.register_forward_hook(hook_aa)
+            print("amino acid hooks registered")
+  
+        # Bert not tested yet
+        if model_type == "bert":
+             for x in model.encoder.layer:
+                  if isinstance(x, BertIntermediate):
+                     x.dense.wi.register_forward_hook(hook_seq)
+
+    # Set up sequence_activations only hook if not getting aa_activations
+    if get_sequence_activations == True and get_aa_activations == False:
+        if  model_type == "t5":
+            for block in model.encoder.block:
+               # Then loop through components (attn, ff) of the layer
+               for x in block.layer:
+                   if isinstance(x, T5LayerFF) :
+                       x.DenseReluDense.wi.register_forward_hook(hook_seq)
+            print("sequence hooks registered")
+    
+        if model_type == "bert":
+             for x in model.encoder.layer:
+                  if isinstance(x, BertIntermediate):
+                     x.dense.wi.register_forward_hook(hook_seq)
+                   
+ 
+    if torch.cuda.device_count() > 1 and  cpu_only == False:
        print("Let's use", torch.cuda.device_count(), "GPUs!")
        model = nn.DataParallel(model, device_ids=device_ids).cuda()
-       #model.to(device_ids) ??? 
    
     else:
+       if cpu_only == True:
+           half = False 
+           print("Embedding on cpu, even though gpu available")
+
        model = model.to(device)
 
     batch_size = 1
@@ -427,37 +545,32 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
     maxlen = max(seqlens)
     print("padding", padding)
     print('maxlen', maxlen)
-    #if padding:
-    #   maxlen = maxlen + 10
     get_sequence_embeddings_final_layer_only = False    
     numseqs = len(seqs)
     with torch.no_grad():
 
-        # For each chunk of data
+         # For each chunk of data
+        counter = 0
         for data in data_loader:
+            #seq_time = time.time()
             #print(count * batch_size, numseqs)
             input = data.to(device)
             # DataParallel model splits data to the different devices and gathers back
             # nvidia-smi shows 4 active devices (when there are 4 GPUs)
+            #embed_time = time.time()
             model_output = model(**input)
- 
-            # Do final processing here. 
-            if get_sequence_embeddings_final_layer_only == True:
+             
+            counter = counter + 1
+            if counter % 100 == 0:
+                   print("{} sequences run".format(counter))
+                   torch.cuda.empty_cache()
+                   gc.collect()
+                   if get_sequence_embeddings == False and get_aa_embeddings == False:
+                        del model_output  # Not needed, stored in hooked_activations
+                        del data 
 
-                
-
-
-                # Attention mask is all ones, so not helpful
-                # Old way 
-                sequence_embeddings = mean_pooling(model_output, data['attention_mask'])
-                sequence_embeddings = sequence_embeddings.to('cpu')
- 
-                if sequence_pcamatrix_pkl:
-                    sequence_embeddings = apply_pca(sequence_embeddings, seq_pcamatrix, seq_bias)
-
-                sequence_array_list.append(sequence_embeddings)
-
-            else: #  get_aa_embeddings == True:
+            if get_aa_embeddings == True or get_sequence_embeddings == True: 
+                aa_time = time.time()
                 aa_embeddings, aa_shape = retrieve_aa_embeddings(model_output, model_type = model_type, layers = layers, heads = heads, padding = padding)
                 aa_embeddings = aa_embeddings.to('cpu')
                 aa_embeddings = np.array(aa_embeddings)
@@ -465,6 +578,7 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
                 if get_sequence_embeddings == True:
                      # Get sentence embeddings by averaging aa embeddings
                      # Note that this includes padding characters in the mean
+                     # Is there any overflow error coming from here?
                      sequence_embeddings = np.mean(aa_embeddings, axis = 1)
 
                      if strat == "meansig":
@@ -481,6 +595,7 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
 
                 if aa_pcamatrix_pkl:
                     aa_embeddings = np.apply_along_axis(apply_pca, 2, aa_embeddings, aa_pcamatrix, aa_bias)
+
                 # Trim each down to just its sequence length
                 if ragged_arrays == True:
                     aa_embed_ak_intermediate_list = []
@@ -505,14 +620,55 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
                         aa_array_list.append(aa_embeddings)
 
             count = count + 1
-
         end = time.time() 
         print("Total time to embed = {}".format(end - start))
   
  
-        
+        # Collect hooked activations 
         lengths = np.array(seqlens)
         embedding_dict = {}
+        numlayers = model_config.num_layers
+        numneurons =  model_config.d_ff
+ 
+        if get_aa_activations == True: 
+                # Need to use hook_aa here
+ 
+                # This list is 24 (num layers) * num seqs
+                # Squeeze removes extra dimension (1, x, x)
+                hooked_activations = [x.squeeze(0) for x in hooked_activations]
+
+
+                # Break into individual lists for each sequence
+                new_lists = [hooked_activations[i:i+numlayers] for i in range(0, len(hooked_activations), numlayers)]
+
+                # Combine each sequence's activations into one array
+                stacked_lists = [np.stack(x) for x in new_lists]
+
+                # Combine all the activations from different layers into one dimension
+                reshaped = [np.concatenate(x, axis = 1) for x  in stacked_lists]
+
+                
+                # Do the sentence one first, because doesnt require padding. 
+                # This is related to sequence length...what about the mean?
+                if get_sequence_activations == True:
+                    sequence_activations_list = [np.max(x.astype(np.float32), axis=0) for x in reshaped]
+                    sequence_activations = np.stack(sequence_activations_list)
+                    contains_inf = np.any(np.isinf(sequence_activations) & (sequence_activations < 0))
+                    embedding_dict['sequence_activations'] = sequence_activations
+
+
+                padded_activations = [np.pad(x, [(0, maxlen + 1 - x.shape[0] ), (0, 0)]) for x in reshaped]
+                print("padded activations done")
+                stacked = np.stack(padded_activations)
+                embedding_dict['aa_activations'] = stacked
+
+        elif get_sequence_activations == True:
+                stacked = np.stack([x for x in hooked_activations])
+                # go from (numlayers, numseqs, numneurons) to (numseqs, numlayers * numneurons)
+                sequence_activations = stacked.reshape(numseqs, numlayers * numneurons)  #np.transpose(stacked, (1, 0, 2)).reshape(2, -1)  
+                embedding_dict['sequence_activations'] = sequence_activations
+               
+
 
         if get_sequence_embeddings == True:
             embedding_dict['sequence_embeddings'] = np.concatenate(sequence_array_list)
@@ -523,8 +679,7 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
 
             embedding_dict['aa_embeddings'] = np.concatenate(aa_array_list)
 
-        print("Returning all embeddings")
-
+        print("Complete")
         return(embedding_dict)
 
     
@@ -538,26 +693,21 @@ if __name__ == "__main__":
    
     if args.get_sequence_embeddings == False:
          if args.get_aa_embeddings == False:
-             print("Must add --get_sequence_embeddings and/or --get_aa_embeddings, otherwise nothing to compute")
-             exit(1)
+             if args.get_sequence_activations == False:
+                 if args.get_sequence_activations == False:
+                     print("Must add --get_sequence_embeddings and/or --get_aa_embeddings and/or --get_sequence_activations and/or get_aa_activations, otherwise nothing to compute")
+                     exit(1)
     ids, sequences, sequences_spaced = parse_fasta_for_embed(fasta_path = args.fasta_path, 
                                                              truncate = args.truncate, 
                                                              padding = args.padding)
 
     print("First sequences")
-    #print(sequences)
     seqlens = [len(x) for x in sequences]
     
-    #if args.extra_padding:
-    #   padding = 5
-
-    #else: 
-    #   padding = 0
-    
-    #print(sequences_spaced)
     layers = args.layers
     heads = args.heads
-    padding = args.padding
+    padding = args.padding 
+    cpu_only = args.cpu_only
     if heads is not None:
        with open(heads, "r") as f:
          headnames = f.readlines()
@@ -569,11 +719,12 @@ if __name__ == "__main__":
        headnames = None
 
 
-
     embedding_dict = get_embeddings(sequences_spaced, 
                                     args.model_path, 
                                     get_sequence_embeddings = args.get_sequence_embeddings, 
                                     get_aa_embeddings = args.get_aa_embeddings, 
+                                    get_sequence_activations = args.get_sequence_activations,
+                                    get_aa_activations = args.get_aa_activations,
                                     padding = padding, 
                                     seqlens = seqlens,
                                     layers = layers,
@@ -581,35 +732,67 @@ if __name__ == "__main__":
                                     ragged_arrays = args.ragged_arrays,
                                     aa_pcamatrix_pkl = args.aa_pcamatrix_pkl, 
                                     sequence_pcamatrix_pkl = args.sequence_pcamatrix_pkl,
-                                    strat = args.strat)
-   
+                                    strat = args.strat,
+                                    cpu_only = cpu_only)
     # Reduce sequence dimension with a new pca transform 
+
     if args.sequence_target_dim:
+
        pkl_pca_out = "{}.sequence.{}dim.pcamatrix.pkl".format(args.fasta_path, args.sequence_target_dim)
+
        embedding_dict['sequence_embeddings'] =  control_pca(embedding_dict, 
+
                                                 'sequence_embeddings', 
+
                                                 pkl_pca_out = pkl_pca_out, 
+
                                                 target_dim = args.sequence_target_dim, 
+
                                                 max_train_sample_size = None)
+
+
 
     # Reduce aa dimension with a new pca transform 
+
     if args.aa_target_dim:
+
        pkl_pca_out = "{}.aa.{}dim.pcamatrix.pkl".format(args.fasta_path, args.aa_target_dim)
+
        embedding_dict['aa_embeddings'] =  control_pca(embedding_dict, 
+
                                                 'aa_embeddings', 
+
                                                 pkl_pca_out = pkl_pca_out, 
+
                                                 target_dim = args.aa_target_dim, 
+
                                                 max_train_sample_size = None)
 
+
+
              
+
     #Store sequences & embeddings on disk
+
     if args.pkl_out:
 
+
+
         with open(args.pkl_out, "wb") as fOut:
+
            pickle.dump(embedding_dict, fOut, protocol=pickle.HIGHEST_PROTOCOL)
+
     
+
         pkl_log = "{}.description".format(args.pkl_out)
-        with open(pkl_log, "w") as pOut:
+
+        with open(pkl_log, "w") as pOut: 
+            if args.get_aa_activations == True:
+               pOut.write("Object {} dimensions: {}\n".format('aa_activations', embedding_dict['aa_activations'].shape))
+
+            if args.get_sequence_activations == True:
+               pOut.write("Object {} dimensions: {}\n".format('sequence_activations', embedding_dict['sequence_activations'].shape))
+  
             if args.get_sequence_embeddings == True:
                pOut.write("Object {} dimensions: {}\n".format('sequence_embeddings', embedding_dict['sequence_embeddings'].shape))
 
@@ -631,10 +814,13 @@ if __name__ == "__main__":
             for x in ids:
               pOut.write("{}\n".format(x))
     
+            seq_file = "{}.seqnames".format(args.pkl_out)
+            with open(seq_file, "w") as pOut2:
+                for x in ids:
+                  pOut2.write("{}\n".format(x))
+
     
     
-    
-# Would like to use SentenceTransformers GPU parallelization, but only currently can do sequence embeddings. Need to do adapt it
 def embed_sequences(model_path, sequences, extra_padding,  pkl_out):
     '''
     
@@ -678,6 +864,4 @@ def embed_sequences(model_path, sequences, extra_padding,  pkl_out):
     #model.stop_multi_process_pool(pool)
 
     return(embeddings)    
-   
-
 
