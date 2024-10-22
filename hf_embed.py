@@ -475,18 +475,22 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
     # Set up aa_actiation hook
     if get_aa_activations == True:
         if  model_type == "t5":
-            for block in model.encoder.block:
-               # Then loop through components (attn, ff) of the layer
-               for x in block.layer:
-                   if isinstance(x, T5LayerFF) :
-                       x.DenseReluDense.wi.register_forward_hook(hook_aa)
+            for i, block in enumerate(model.encoder.block):
+               print("+++++ ", i, layers)# Then loop through components (attn, ff) of the layer
+               if layers is None or i in layers:
+                    block.layer[-1].DenseReluDense.wi.register_forward_hook(hook_aa) 
+                    print("hooking layer: ", i)
+
+            #    for x in block.layer:
+            #        if isinstance(x, T5LayerFF) :
+            #            x.DenseReluDense.wi.register_forward_hook(hook_aa)
             print("amino acid hooks registered")
   
         # Bert not tested yet
-        if model_type == "bert":
-             for x in model.encoder.layer:
-                  if isinstance(x, BertIntermediate):
-                     x.dense.wi.register_forward_hook(hook_seq)
+        # if model_type == "bert":
+        #      for x in model.encoder.layer:
+        #           if isinstance(x, BertIntermediate):
+        #              x.dense.wi.register_forward_hook(hook_seq)
 
     # Set up sequence_activations only hook if not getting aa_activations
     if get_sequence_activations == True and get_aa_activations == False:
@@ -627,7 +631,10 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
         # Collect hooked activations 
         lengths = np.array(seqlens)
         embedding_dict = {}
-        numlayers = model_config.num_layers
+        if layers:                 #______________________________________________________
+            numlayers = len(layers)
+        else:
+            numlayers = model_config.num_layers
         numneurons =  model_config.d_ff
  
         if get_aa_activations == True: 
@@ -659,8 +666,9 @@ def get_embeddings(seqs, model_path, seqlens, get_sequence_embeddings = True, ge
 
                 padded_activations = [np.pad(x, [(0, maxlen + 1 - x.shape[0] ), (0, 0)]) for x in reshaped]
                 print("padded activations done")
-                stacked = np.stack(padded_activations)
-                embedding_dict['aa_activations'] = stacked
+                #print("--------> ", padded_activations)
+                # stacked = np.stack(padded_activations)
+                embedding_dict['aa_activations'] = padded_activations #stacked
 
         elif get_sequence_activations == True:
                 stacked = np.stack([x for x in hooked_activations])
@@ -694,8 +702,8 @@ if __name__ == "__main__":
     if args.get_sequence_embeddings == False:
          if args.get_aa_embeddings == False:
              if args.get_sequence_activations == False:
-                 if args.get_sequence_activations == False:
-                     print("Must add --get_sequence_embeddings and/or --get_aa_embeddings and/or --get_sequence_activations and/or get_aa_activations, otherwise nothing to compute")
+                 if args.get_aa_activations == False:    # <-----------------
+                     print("Must add --get_sequence_embeddings and/or --get_aa_embeddings and/or --get_sequence_activations and/or --get_aa_activations, otherwise nothing to compute")
                      exit(1)
     ids, sequences, sequences_spaced = parse_fasta_for_embed(fasta_path = args.fasta_path, 
                                                              truncate = args.truncate, 
@@ -864,4 +872,5 @@ def embed_sequences(model_path, sequences, extra_padding,  pkl_out):
     #model.stop_multi_process_pool(pool)
 
     return(embeddings)    
+
 
