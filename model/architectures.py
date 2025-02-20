@@ -1,3 +1,14 @@
+"""
+This code contains implementations derived from:
+
+'Aggregating Residue-Level Protein Language Model Embeddings with Optimal Transport'
+by Navid NaderiAlizadeh, Rohit Singh
+bioRxiv 2024.01.29.577794; doi: https://doi.org/10.1101/2024.01.29.577794
+
+The SWE_Pooling implementation and related components are based on the methods 
+described in this paper.
+"""
+
 from types import SimpleNamespace
 
 import os
