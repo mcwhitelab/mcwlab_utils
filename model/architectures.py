@@ -307,16 +307,8 @@ class SWE_Pooling(nn.Module):
             self.theta.weight_v.requires_grad = False
             self.reference.requires_grad = False
 
-        # weights to reduce the output embedding dimensionality
-        self.weight = nn.Linear(num_ref_points, 1, bias=False)
-
-    #def half(self):
-    #    """Convert model to half precision"""
-    #    super().half()
-    #    self.theta = self.theta.half()
-    #    self.weight = self.weight.half()
-    #    self.reference = nn.Parameter(self.reference.half())
-    #    return self
+        # Remove learned weights, will use uniform weighting (mean) instead
+        self.weight = None
 
     def forward(self, X, mask=None):
         '''
@@ -328,18 +320,15 @@ class SWE_Pooling(nn.Module):
             X:  B x N x dn tensor, containing a batch of B sets, each containing N samples in a dn-dimensional space
             mask [optional]: B x N binary tensor, with 1 iff the set element is valid; used for the case where set sizes are different
         Output:
-            weighted_embeddings: B x num_slices tensor, containing a batch of B embeddings, each of dimension "num_slices" (i.e., number of slices)
+            weighted_embeddings: B x num_slices tensor, containing a batch of B embeddings, each of dimension "num_slices"
         '''
-
         B, N, _ = X.shape       
         Xslices = self.get_slice(X)
 
         M, _ = self.reference.shape
-        dtype = X.dtype  # Get input dtype to match all created tensors
 
         if mask is None:
-            # serial implementation should be used if set sizes are different and no input mask is provided
-            Xslices_sorted, Xind = torch.sort(Xslices, dim=1)
+            Xslices_sorted, _ = torch.sort(Xslices, dim=1)
 
             if M == N:
                 Xslices_sorted_interpolated = Xslices_sorted
@@ -389,13 +378,12 @@ class SWE_Pooling(nn.Module):
             Xslices_sorted_interpolated = torch.transpose(Interp1d()(x, y, xnew).view(B, self.num_slices, -1), 1, 2)
 
         Rslices = self.reference.expand(Xslices_sorted_interpolated.shape)
-
         _, Rind = torch.sort(Rslices, dim=1)
-        embeddings = (Rslices - torch.gather(Xslices_sorted_interpolated, dim=1, index=Rind)).permute(0, 2, 1) # B x num_slices x M
-
-        weighted_embeddings = self.weight(embeddings).sum(-1)
-
-        return weighted_embeddings.view(-1, self.num_slices)
+        
+        embeddings = (Rslices - torch.gather(Xslices_sorted_interpolated, dim=1, index=Rind)).permute(0, 2, 1)
+        output_embeddings = embeddings.mean(dim=-1)
+        
+        return output_embeddings
 
     def get_slice(self, X):
         '''
