@@ -72,7 +72,7 @@ def get_model_config_attributes(model_path):
         
     Returns:
         dict containing:
-            - max_sequence_length: Maximum sequence length the model can handle
+            - max_sequence_length: Maximum sequence length the model can handle (for tokenizer max_length)
             - num_layers: Number of layers in the model
             - hidden_size: Size of hidden layers
             - ff_size: Size of feedforward layers
@@ -81,64 +81,73 @@ def get_model_config_attributes(model_path):
     model_config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
     model_type = model_config.model_type
     
-    # Handle nested config for protst (has both a protein and a text component)
+    # Handle nested config for protst
     if model_type == "protst" and hasattr(model_config, 'protein_config'):
         protein_config = model_config.protein_config
     else:
-        protein_config = model_config # Use the main config if not protst or no protein_config
+        protein_config = model_config
 
-    print(dir(protein_config)) # Print attributes of the config being used
+    print(dir(protein_config))
 
-    # Get max sequence length: Prioritize config attribute, fallback to dictionary
-    if hasattr(protein_config, 'max_position_embeddings'):
-        max_sequence_length = protein_config.max_position_embeddings
-        print(f"Using max_position_embeddings ({max_sequence_length}) from config for max sequence length")
+    # --- Get max sequence length: Prioritize hardcoded dictionary, fallback to config ---
+    max_lengths = {
+        "t5": 512,
+        "bert": 1024,  # ProtBERT
+        "ESMplusplus": 2048,
+        "esm": 2048 if "esm2" in model_path.lower() else 1024,  # ESM-2 vs ESM-1
+        "protst": 1024  # Use 1024 like the archive script
+    }
+    max_sequence_length = max_lengths.get(model_type)
+
+    if max_sequence_length:
+        print(f"Using dictionary max length ({max_sequence_length}) for model type {model_type}")
+    elif hasattr(protein_config, 'max_position_embeddings'):
+        # Fallback to max_position_embeddings only if type not in dict
+        max_sequence_length = protein_config.max_position_embeddings - 2
+        print(f"Warning: Model type {model_type} not in dictionary. Using max_position_embeddings ({max_sequence_length}) -2 from config.")
+        print(f"If both CLS and SEP aren't used in the model, will cause CUDA errors")
     else:
-        max_lengths = {
-            "t5": 512,
-            "bert": 1024,  # ProtBERT
-            "ESMplusplus": 2048,
-            "esm": 2048 if "esm2" in model_path.lower() else 1024,  # ESM-2 vs ESM-1
-            "protst": 1024  # ProST-ESM1b - Fallback value
-        }
-        max_sequence_length = max_lengths.get(model_type)
-        if max_sequence_length:
-            print(f"Using fallback max length ({max_sequence_length}) for model type {model_type}")
-        else:
-            print(f"Warning: Could not determine max sequence length for model type {model_type} from config or fallback dict.")
+        print(f"Warning: Could not determine max sequence length for model type {model_type} from config or fallback dict.")
+        max_sequence_length = None # Ensure it's None if undetermined
 
 
     print("model_type", model_type)
 
-    # Get number of layers
+    # Get number of layers (using protein_config or model_config)
     if hasattr(protein_config, 'num_hidden_layers'):
         num_layers = protein_config.num_hidden_layers
     elif hasattr(protein_config, 'num_layers'):
         num_layers = protein_config.num_layers
     else:
         print(f"Warning: Could not determine number of layers for model type {model_type}")
-        num_layers = None 
+        num_layers = None
 
     # Get hidden size
-    if hasattr(protein_config, 'hidden_size'):
+    if model_type == "protst":
+        hidden_size = 512
+    elif hasattr(protein_config, 'hidden_size'):
         hidden_size = protein_config.hidden_size
     elif hasattr(protein_config, 'd_model'):
         hidden_size = protein_config.d_model
     else:
         print(f"Warning: Could not determine hidden size for model type {model_type}")
-        hidden_size = None # Or a sensible default/error handling
+        hidden_size = None
 
     # Get feedforward size
     if hasattr(protein_config, 'intermediate_size'):
         ff_size = protein_config.intermediate_size
     elif hasattr(protein_config, 'd_ff'):
         ff_size = protein_config.d_ff
-    elif model_type in ["ESMplusplus"]: # Specific models known to potentially lack this
-         ff_size = 0 # Keep default 0 if not found for these types
-         print(f"Setting ff_size to 0 for model type {model_type} as attribute not found.")
-    else:
-        print(f"Warning: Could not determine feedforward size for model type {model_type}")
-        ff_size = None # Or a sensible default/error handling
+    elif model_type in ["ESMplusplus", "protst"]: # ProtST ff_size is handled by its protein_config, ESM++ might lack it
+         if not hasattr(protein_config, 'intermediate_size') and not hasattr(protein_config, 'd_ff'):
+              ff_size = 0 # Keep default 0 if not found for these types
+              print(f"Setting ff_size to 0 for model type {model_type} as standard attributes not found.")
+         else: # If attributes were found above, ff_size is already set
+             pass
+    else: # Other model types
+         if not hasattr(protein_config, 'intermediate_size') and not hasattr(protein_config, 'd_ff'):
+            print(f"Warning: Could not determine feedforward size for model type {model_type}")
+            ff_size = None
 
     return {
         "max_sequence_length": max_sequence_length,
@@ -204,15 +213,20 @@ def retrieve_aa_embeddings(model_output, model_type, layers=None, padding=0, seq
     '''
     # Get all hidden states
     hidden_states = model_output.hidden_states
-    
-    # If no layers specified, use the final layer
-    if layers is None:
-        aa_embeddings = hidden_states[-1]
-    else:
-        # Concatenate specified hidden states into long vector
-        aa_embeddings = torch.cat(tuple([hidden_states[i] for i in layers]), dim=-1)
-    
 
+    # Handle different model types
+    if model_type == "protst":
+        # For ProtST, hidden_states is already the last layer's tensor
+        # Layer selection isn't applicable as we only have access to the final layer
+        aa_embeddings = hidden_states
+    else:
+        # For other models, hidden_states is a tuple of tensors (one per layer)
+        if layers is None:
+            aa_embeddings = hidden_states[-1]
+        else:
+            # Concatenate specified hidden states into long vector
+            aa_embeddings = torch.cat(tuple([hidden_states[i] for i in layers]), dim=-1)
+    
     # First trim the embeddings
     if model_type in ["bert", "esm", "ESMplusplus", "protst"]:
         front_trim = 1 + padding
@@ -231,24 +245,21 @@ def retrieve_aa_embeddings(model_output, model_type, layers=None, padding=0, seq
     # Only process the actual number of sequences in this batch
     for i in range(min(len(seqlens), aa_embeddings.shape[0])):
         attention_mask[i, :seqlens[i]] = 1
-    
-
-
+ 
     return aa_embeddings, attention_mask, aa_embeddings.shape
 
 
-def load_model(model_path, output_hidden_states = True, output_attentions = False, half = False, return_config = False):
+def load_model(model_path, output_hidden_states = True, output_attentions = False, half = False):
     '''
-    Takes path to huggingface model directory
-    Returns the model and the tokenizer, and optionally the model config
+    Takes path to huggingface model directory.
+    Loads the model and tokenizer.
+    Gets and returns model configuration attributes.
+    Returns the model, the tokenizer, and the config_attrs dictionary.
     '''
-    model_config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
-    model_type = model_config.model_type
-    print("This is a {} model".format(model_type))
-
-    # Use get_model_config_attributes to get model attributes
+    # Get config attributes first
     config_attrs = get_model_config_attributes(model_path)
-    
+    model_type = config_attrs["model_type"]
+
     # Print all attributes
     print("\nModel Configuration:")
     print(model_path)
@@ -256,52 +267,64 @@ def load_model(model_path, output_hidden_states = True, output_attentions = Fals
     for key, value in config_attrs.items():
         print(f"{key:.<30} {value}")
     print("-" * 50 + "\n")
-    
+
     print("load tokenizer")
     print("load_model:model_path", model_path)
     if model_type == "t5":
         print("T5 model")
         tokenizer = T5Tokenizer.from_pretrained(model_path)
         print("tokenizer loaded")
-        model = T5EncoderModel.from_pretrained(model_path, 
-                       output_hidden_states=output_hidden_states, 
+        model = T5EncoderModel.from_pretrained(model_path,
+                       output_hidden_states=output_hidden_states,
                        output_attentions = output_attentions)
         print("model_loaded")
     elif model_type == "ESMplusplus":
+            model =  AutoModelForMaskedLM.from_pretrained(model_path,
 
-
-            model =  AutoModelForMaskedLM.from_pretrained(model_path, 
-                   
                        output_attentions = output_attentions,
                        trust_remote_code=True)
             tokenizer = model.tokenizer
     elif model_type == "protst":
-        # For ProtST models, use ESM tokenizer since it's based on ESM
-        full_model = AutoModel.from_pretrained(model_path, 
+        # For ProtST models
+        print("Loading full ProtST model...")
+        full_model = AutoModel.from_pretrained(model_path,
                    output_hidden_states=output_hidden_states,
                    output_attentions=output_attentions,
                    trust_remote_code=True)
+        
+        # --- REVERT to always using standard ESM tokenizer for ProtST ---
+        print(f"Using standard ESM tokenizer (facebook/esm2_t33_650M_UR50D) for ProtST.")
         tokenizer = EsmTokenizer.from_pretrained("facebook/esm2_t33_650M_UR50D")
-        model = full_model.protein_model
-        print("Using ESM tokenizer for ProtST model")
+        # --- End of revert ---
+
+        model = full_model.protein_model # Use only the protein part
+        
     else:
         print("Automodel", model_path, model_type)
-        model = AutoModel.from_pretrained(model_path, 
-                       output_hidden_states=True, 
+        model = AutoModel.from_pretrained(model_path,
+                       output_hidden_states=True,
                        output_attentions = output_attentions,
                        trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
-    
+
     if model_type == "gpt2":
          # This needs to be checked before using
          tokenizer.pad_token = tokenizer.eos_token
-    if half == True:
-        model.half() # Put model in half precision mode for faster embedding
 
-    if return_config == True:
-       return(model, tokenizer, model_config)
-    else:
-       return(model, tokenizer)
+    # Apply half precision if requested and possible
+    if half and torch.cuda.is_available():
+        try:
+            model.half() # Put model in half precision mode for faster embedding
+            print("Model loaded in half precision.")
+        except Exception as e:
+            print(f"Warning: Could not load model in half precision: {e}")
+            half = False # Revert flag if half precision fails
+    elif half and not torch.cuda.is_available():
+        print("Warning: Half precision requested but CUDA not available. Loading in full precision.")
+        half = False
+
+    # Return model, tokenizer, and the fetched config attributes
+    return model, tokenizer, config_attrs
 
 
 
@@ -356,43 +379,63 @@ class ListDataset(Dataset):
 
 
 
-def get_embeddings(seqs, model_path, config_attrs, seqlens, get_sequence_embeddings = True, get_aa_embeddings = True, get_sequence_activations = False, get_aa_activations = False, padding = 0, aa_pcamatrix_pkl = None, sequence_pcamatrix_pkl = None, layers = None, all_layers = False, strat=["meansig"], cpu_only = False, half = False, batch_size = 1):
+def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_embeddings = True, get_aa_embeddings = True, get_sequence_activations = False, get_aa_activations = False, padding = 0, aa_pcamatrix_pkl = None, sequence_pcamatrix_pkl = None, layers = None, all_layers = False, strat=["meansig"], cpu_only = False, half = False, batch_size = 1):
     '''
-    Encode sequences with a transformer model
+    Encode sequences with a pre-loaded transformer model
 
     Takes:
-       model_path (str): Path to a particular transformer model
-                         ex. "prot_bert_bfd"
+       model (torch.nn.Module): The pre-loaded transformer model.
+       tokenizer: The pre-loaded tokenizer.
        config_attrs (dict): Dictionary containing model configuration attributes
-                            (max_sequence_length, num_layers, hidden_size, ff_size, model_type)
-       sequences (list): List of sequences with a space between each amino acid.
+                            (max_sequence_length, num_layers, hidden_size, ff_size, model_type).
+       seqs (list): List of sequences with a space between each amino acid.
                          ex ["M E T", "S E Q"]
- 
+       seqlens (list): List of original sequence lengths (before padding).
+       ... other args ...
    '''
     print("CUDA available?", torch.cuda.is_available())
 
-    # half precision doesn't work on CPU
-    if not torch.cuda.is_available():
-        half = False
-    else:
-        # Keep half precision as passed, or default based on availability
-        pass # half is already set by the argument or default logic
+    # Determine if half precision is effectively used (based on model state passed in)
+    # Note: The 'half' parameter passed here is less critical now,
+    # as the model's precision is determined when loaded.
+    # We might still use it for SWE model loading later.
+    model_is_half = next(model.parameters()).dtype == torch.float16
+    print(f"Model received is in {'half' if model_is_half else 'full'} precision.")
 
-    if get_aa_embeddings == True or get_sequence_embeddings == True:
-         output_hidden_states = True
-    else:
-         output_hidden_states = False
 
-    model, tokenizer, _ = load_model(model_path, output_hidden_states = output_hidden_states, return_config = False, half = half) # Don't need config again
-    model_type = config_attrs["model_type"] # Use config_attrs
-    print("This is a {} model".format(model_type))
-    print("Model loaded")
+    # No need to load model/tokenizer here - they are passed in.
+    model_type = config_attrs["model_type"] # Use config_attrs passed in
+    print("Using pre-loaded {} model".format(model_type))
+
     aa_shapes = []
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print("device", device)
     device_ids =list(range(0, torch.cuda.device_count()))
     print("device_ids", device_ids)
     model = model.eval()
+
+    # Send model to the correct device if not already there
+    # Check if model is already on the target device
+    current_device = next(model.parameters()).device
+    if current_device != device:
+         if torch.cuda.device_count() > 1 and not cpu_only:
+             print("Let's use", torch.cuda.device_count(), "GPUs!")
+             # Check if model is already DataParallel
+             if not isinstance(model, nn.DataParallel):
+                  model = nn.DataParallel(model, device_ids=device_ids).to(device) # Send to CUDA
+             else:
+                  print("Model already wrapped in DataParallel.")
+                  model = model.to(device) # Ensure it's on the primary CUDA device if multi-GPU
+         else:
+             if cpu_only:
+                 print("Embedding on cpu, even though gpu available")
+                 model = model.to('cpu')
+             else:
+                  print(f"Moving model to {device}")
+                  model = model.to(device)
+    else:
+        print(f"Model already on device: {current_device}")
+
 
     hooked_activations = []
     def hook_seq(module, input, output):
@@ -413,29 +456,34 @@ def get_embeddings(seqs, model_path, config_attrs, seqlens, get_sequence_embeddi
 
     # Set up sequence_activations only hook if not getting aa_activations
     if get_sequence_activations == True:
-        if  model_type == "t5":
-            for i, block in enumerate(model.encoder.block):
-               # Then loop through components (attn, ff) of the layer
-               for x in block.layer:
-                   if isinstance(x, T5LayerFF) and (layers is None or i in layers):
-                       x.DenseReluDense.wi.register_forward_hook(hook_seq)
-                       print(f"Hook registered for layer {i}")
-            print("sequence hooks registered")
+        # Hook registration needs the actual model object (which might be wrapped)
+        target_model = model.module if isinstance(model, nn.DataParallel) else model
+        if model_type == "t5":
+             # Ensure we're accessing the encoder correctly, even if model is T5EncoderModel directly
+             encoder_module = target_model if isinstance(target_model, T5EncoderModel) else getattr(target_model, 'encoder', None)
+             if encoder_module and hasattr(encoder_module, 'block'):
+                 for i, block in enumerate(encoder_module.block):
+                    # Then loop through components (attn, ff) of the layer
+                    for x in block.layer:
+                        if isinstance(x, T5LayerFF) and (layers is None or i in layers):
+                            x.DenseReluDense.wi.register_forward_hook(hook_seq)
+                            print(f"Hook registered for T5 layer {i}")
+                 print("T5 sequence hooks registered")
+             else:
+                 print("Warning: Could not find encoder blocks to register hooks for T5.")
+        # Add hook registration logic for other model types if needed
 
-    if torch.cuda.device_count() > 1 and  cpu_only == False:
-       print("Let's use", torch.cuda.device_count(), "GPUs!")
-       model = nn.DataParallel(model, device_ids=device_ids).cuda()
-
-    else:
-       if cpu_only == True:
-           half = False
-           print("Embedding on cpu, even though gpu available")
-
-       model = model.to(device)
 
     batch_size = batch_size
     # Use config_attrs directly
     max_length = config_attrs["max_sequence_length"]
+
+    # Check if max_length is None and handle appropriately
+    if max_length is None:
+        print("Warning: max_sequence_length is None. Attempting to proceed without it, but padding/truncation might be unpredictable.")
+        # Optionally set a default or raise an error
+        # max_length = 1024 # Example default
+
 
     collate = Collate(tokenizer=tokenizer, max_length=max_length, model_type=model_type)
 
@@ -461,160 +509,235 @@ def get_embeddings(seqs, model_path, config_attrs, seqlens, get_sequence_embeddi
 
     # Determine number of layers in the model using config_attrs
     num_total_layers = config_attrs["num_layers"]
+    if num_total_layers is None:
+         print("Error: num_layers is None. Cannot proceed.")
+         return {}
+
 
     # If all_layers is True, use all available layers
     if all_layers:
         layers = list(range(num_total_layers))
-        print(f"Using all {num_total_layers} layers for embeddings")
+        print(f"Using all {num_total_layers} layers for embeddings: {layers}")
+    elif layers == [-1]:
+        layers = [num_total_layers - 1]
+        print(f"Using last layer ({layers[0]}) for embeddings.")
+    elif layers is not None:
+        # Adjust negative layer indices relative to num_total_layers
+        layers = [l if l >= 0 else num_total_layers + l for l in layers]
+        
+        # Check if any requested layers exceed the available layers
+        if any(l >= num_total_layers for l in layers):
+            print(f"Warning: Requested layers {layers} exceed available layers (0 to {num_total_layers-1})")
+            print(f"Falling back to using all {num_total_layers} available layers")
+            layers = list(range(num_total_layers))
+        else:
+            print(f"Using specified layers: {layers}")
+    elif layers is None:
+         layers = [num_total_layers - 1]
+         print(f"Defaulting to last layer ({layers[0]}) for embeddings.")
+
 
     # Use hidden_size from config_attrs
-    hidden_size = config_attrs["hidden_size"]
+    hidden_size = config_attrs.get("hidden_size") # Use .get for safety
+    if hidden_size is None:
+         print("Error: hidden_size is None in config_attrs. Cannot proceed.")
+         return {} # Handle error
 
+    # Setup SWE model if needed
+    swe_model = None
     if "swe" in strat:
         torch.manual_seed(42)
+        # For ProtST, we only have the last layer regardless of layers parameter
+        if model_type == "protst":
+            num_layers_to_use = 1
+            swe_d_in = hidden_size
+        else:
+            # For other models, use the number of specified layers
+            num_layers_to_use = len(layers)
+            if num_layers_to_use == 0:
+                print("Error: Cannot initialize SWE model with 0 layers selected.")
+                return {}
+            swe_d_in = hidden_size * num_layers_to_use
+            
+        print(f"Initializing SWE Pooling with d_in={swe_d_in} (hidden_size={hidden_size}, num_layers_used={num_layers_to_use})")
 
-        swe_model = SWE_Pooling(d_in = hidden_size * num_layers_to_use,
-                               num_slices = hidden_size * num_layers_to_use,
+        swe_model = SWE_Pooling(d_in = swe_d_in,
+                               num_slices = swe_d_in, # Typically num_slices matches d_in
                                num_ref_points=100,
                                freeze_swe=True)
 
-        # Move model to device and convert to half precision if needed
+        # Move SWE model to device
         swe_model = swe_model.to(device)
-        #if half:
-        #   swe_model.half()
-
 
     count = 0
+    output_hs_needed = get_aa_embeddings or get_sequence_embeddings # Check if hidden states are needed at all
+
+    # Main embedding loop
     with torch.inference_mode():
-        for data in data_loader:
-            batch_size = data['input_ids'].shape[0]
-            batch_seqlens = seqlens[count:count+batch_size]
+        for i, data in enumerate(data_loader): # Add enumerate for batch index
+            batch_size_actual = data['input_ids'].shape[0] # Use actual batch size
+            batch_seqlens = seqlens[count:count+batch_size_actual]
 
             # Run model
+            inputs = {k: v.to(device) for k, v in data.items()}
 
-            if model_type == "ESMplusplus":
-                inputs = data.to(device)
-                model_output = model(**inputs, output_hidden_states=True)
-            elif model_type == "protst":
-                # For ProtST, we only need input_ids and attention_mask for protein embeddings
-                protein_outputs = model(
-                    data['input_ids'].to(device),
-                    attention_mask=data['attention_mask'].to(device),
-                    return_dict=True
+            # Adapt model call based on type and expected output
+            try:
+                if model_type == "protst":
+                     # ProtST requires only input_ids and attention_mask for the protein_model part
+                     protein_outputs = model(
+                         input_ids=inputs['input_ids'],
+                         attention_mask=inputs['attention_mask'],
+                         return_dict=True,
+                         output_hidden_states=True # Pass flag here too
+                     )
+                    
+                     hidden_states_output = protein_outputs.residue_feature
+                
+
+                     model_output = type('ModelOutput', (), {'hidden_states': hidden_states_output})
+
+                else: # General case for T5EncoderModel, AutoModel, etc.
+                     output_hs = get_aa_embeddings or get_sequence_embeddings
+                     model_output = model(**inputs, output_hidden_states=output_hs)
+                  
+
+                # Ensure model_output.hidden_states is not None before proceeding
+                if not hasattr(model_output, 'hidden_states') or model_output.hidden_states is None:
+                     print(f"Warning: hidden_states not found in model output for batch starting at index {count}. Skipping batch.")
+                     count += batch_size_actual
+                     continue
+
+
+                aa_embeddings_tensor, attention_mask, aa_shape = retrieve_aa_embeddings(
+                    model_output,
+                    model_type=model_type,
+                    layers=layers, # Pass processed layer list
+                    padding=padding,
+                    seqlens=batch_seqlens
                 )
-                # print("protein_outputs", protein_outputs)
-                # print("protein_outputs type:", type(protein_outputs))
-
-                # Get protein_feature for embeddings
-                hidden_states = protein_outputs.protein_feature
-                if hidden_states is None:
-                    print("Warning: Could not find protein_feature in model output")
-                    print("Available attributes:", dir(protein_outputs))
-                    hidden_states = None
-                else:
-                    # ProtST outputs hidden states directly in a tuple
-                     hidden_states = (hidden_states,)
-
-                # Get last_hidden_state for embeddings
-                model_output = type('ProtSTOutput', (), {
-                    'hidden_states': hidden_states
-                })
-                # print("Debug - model output type:", type(model_output))
-            else:
-                inputs = data.to(device)
-                model_output = model(**inputs)
-
-            # Ensure model_output.hidden_states is not None before proceeding
-            if model_output.hidden_states is None:
-                 print(f"Warning: hidden_states not found in model output for batch starting at index {count}. Skipping batch.")
-                 count += batch_size
-                 continue
+                
+                # Check if retrieve_aa_embeddings returned successfully
+                if isinstance(aa_embeddings_tensor, int) and aa_embeddings_tensor == 0:
+                    print(f"Error retrieving embeddings for batch starting at index {count}. Skipping batch.")
+                    count += batch_size_actual
+                    continue
 
 
-            aa_embeddings_tensor, attention_mask, aa_shape = retrieve_aa_embeddings(
-                model_output,
-                model_type=model_type,
-                layers=layers,
-                padding=padding,
-                seqlens=batch_seqlens
-            )
+                aa_embeddings = aa_embeddings_tensor.to('cpu')
+                attention_mask = attention_mask.to('cpu')
+                aa_embeddings = np.array(aa_embeddings)
+                attention_mask = np.array(attention_mask)
 
-            aa_embeddings = aa_embeddings_tensor.to('cpu')
-            attention_mask = attention_mask.to('cpu')
-            aa_embeddings = np.array(aa_embeddings)
-            attention_mask = np.array(attention_mask)
+                if get_sequence_embeddings == True:
+                                            # Compute masked mean
+                    # Expand attention mask to match embedding dimensions
+                    mask_expanded = attention_mask[..., None]  # Shape: [batch_size, seq_length, 1]
+                    # Mask out padding tokens and compute mean only over real tokens
+                    # Add epsilon to avoid division by zero if a sequence has zero length after masking
+                    sum_mask = attention_mask.sum(axis=1, keepdims=True)
+                    masked_embeddings = aa_embeddings * mask_expanded
+                    if model_type == "protst":
 
-            if get_sequence_embeddings == True:
-                # Compute masked mean
-                # Expand attention mask to match embedding dimensions
-                mask_expanded = attention_mask[..., None]  # Shape: [batch_size, seq_length, 1]
-                # Mask out padding tokens and compute mean only over real tokens
-                masked_embeddings = aa_embeddings * mask_expanded
-                sequence_embeddings = masked_embeddings.sum(axis=1) / attention_mask.sum(axis=1, keepdims=True)
-                sequence_array_list.append(sequence_embeddings)
+                        sequence_embeddings = np.array(protein_outputs.protein_feature.to("cpu"))
+                    else:
 
-                if "meansig" in strat:
-                    # Similarly mask the std calculation
-                    mean_expanded = sequence_embeddings[:, None, :]  # Shape: [batch_size, 1, hidden_size]
-                    squared_diff = ((aa_embeddings - mean_expanded) * mask_expanded) ** 2
-                    variance = squared_diff.sum(axis=1) / attention_mask.sum(axis=1, keepdims=True)
-                    sequence_embeddings_sigma = np.sqrt(variance)
-                    sequence_sigma_array_list.append(sequence_embeddings_sigma)
+                        sequence_embeddings = masked_embeddings.sum(axis=1) / (sum_mask + 1e-9) # Add epsilon
+                    sequence_array_list.append(sequence_embeddings)
 
-            if "swe" in strat:
-                  # Convert to float32 for SWE_Pooling
-                  aa_embeddings_tensor = aa_embeddings_tensor.float()
-                  sequence_embeddings_swe = swe_model(aa_embeddings_tensor)
-                  sequence_embeddings_swe = sequence_embeddings_swe.cpu().numpy()
-                  sequence_array_swe_list.append(sequence_embeddings_swe)
+                    if "meansig" in strat:
+                        # Similarly mask the std calculation
+                        mean_expanded = sequence_embeddings[:, None, :]  # Shape: [batch_size, 1, hidden_size]
+                        squared_diff = ((aa_embeddings - mean_expanded) * mask_expanded) ** 2
+                        variance = squared_diff.sum(axis=1) / (sum_mask + 1e-9) # Add epsilon
+                        sequence_embeddings_sigma = np.sqrt(variance)
+                        sequence_sigma_array_list.append(sequence_embeddings_sigma)
+              
+                # --- SWE handling reverted fully to archive logic ---
+                if "swe" in strat and swe_model is not None:
+                    # Explicitly convert input tensor to float32 like in archive
+                    aa_embeddings_tensor_float = aa_embeddings_tensor.float()
+                    print("aa_embeddings_tensor_float", aa_embeddings_tensor_float.shape)
 
-            if sequence_pcamatrix_pkl:
-                sequence_embeddings = apply_pca(sequence_embeddings, seq_pcamatrix, seq_bias)
+                    sequence_embeddings_swe = swe_model(aa_embeddings_tensor_float)
+                    
+                    sequence_array_swe_list.append(sequence_embeddings_swe.cpu().numpy())
+                # --- End reverted SWE handling ---
 
+                # Apply PCA if requested (after calculations)
+                if sequence_pcamatrix_pkl:
+                    if get_sequence_embeddings and sequence_embeddings is not None:
+                        sequence_embeddings = apply_pca(sequence_embeddings, seq_pcamatrix, seq_bias)
 
-            if aa_pcamatrix_pkl:
-                aa_embeddings = np.apply_along_axis(apply_pca, 2, aa_embeddings, aa_pcamatrix, aa_bias)
+                if aa_pcamatrix_pkl:
+                    if aa_embeddings is not None and aa_embeddings.size > 0:
+                       aa_embeddings = np.apply_along_axis(apply_pca, 2, aa_embeddings, aa_pcamatrix, aa_bias)
 
-            # Trim each down to just its sequence length
-            if get_aa_embeddings == True:
-                    # If not using ragged arrays, must pad to same dim as longest sequence
-                    # print(maxlen - (aa_embeddings.shape[1] - 1))
-                     #if padding:
-                    #dim2 = maxlen - (aa_embeddings.shape[1])
-                    #npad = ((0,0), (0, dim2), (0,0))
-                    #aa_embeddings = np.pad(aa_embeddings, npad)
-                    aa_array_list.append(aa_embeddings)
+                # Append AA embeddings if requested
+                if get_aa_embeddings == True and aa_embeddings is not None:
+                        aa_array_list.append(aa_embeddings)
 
-            count += batch_size
+                count += batch_size_actual # Increment by actual batch size processed
 
-    end = time.time()
-    print("Total time to embed = {}".format(end - start))
+            except Exception as e:
+                print(f"Error processing hidden states for batch starting at {count}: {e}")
+                count += batch_size_actual
+                continue # Skip batch
+
+        end = time.time()
+        print("Total time to embed = {}".format(end - start))
 
     # Collect results
     embedding_dict = {}
 
     # Get number of neurons in feedforward layer based on model type using config_attrs
     numneurons = config_attrs["ff_size"] # Use config_attrs
+    if numneurons is None:
+         print("Warning: ff_size (numneurons) is None. Activations cannot be processed correctly.")
+         # Handle appropriately, maybe skip activation processing
+
 
     if get_sequence_activations == True:
-        stacked = np.stack([x for x in hooked_activations])
-        # Need numseqs and numlayers for reshaping
-        numseqs = len(seqs) # Get the total number of sequences
-        num_layers_used = len(layers) if layers is not None else num_total_layers
-        # go from (numlayers, numseqs, numneurons) to (numseqs, numlayers * numneurons)
-        # Check dimensions before reshaping
-        expected_elements = num_layers_used * numseqs * numneurons
-        actual_elements = stacked.size
-        print(f"Debug: stacked shape {stacked.shape}, numseqs {numseqs}, num_layers_used {num_layers_used}, numneurons {numneurons}")
-        print(f"Debug: expected elements {expected_elements}, actual elements {actual_elements}")
+        # Ensure hooked_activations is not empty and numneurons is valid
+        if hooked_activations and numneurons is not None and numneurons > 0 :
+            try:
+                stacked = np.stack([x.numpy() for x in hooked_activations]) # Convert tensors in list to numpy before stacking
+                # Need numseqs and numlayers for reshaping
+                numseqs = len(seqs) # Get the total number of sequences
+                # Determine the number of layers hooks were registered for
+                # This is tricky if hooks weren't registered for all layers specified in 'layers' list
+                # Assuming hook was registered for each layer in the 'layers' list if applicable (e.g., for T5)
+                num_layers_hooked = len(layers) if model_type == "t5" and layers is not None else 0 # Adjust based on actual hooking logic
 
-        if actual_elements == expected_elements and numneurons > 0: # Ensure numneurons is valid
-           sequence_activations = stacked.reshape(numseqs, num_layers_used * numneurons)
-           embedding_dict['sequence_activations'] = sequence_activations
-        elif numneurons == 0 and model_type not in ["protst", "ESMplusplus"]: # Only warn if ff_size is expected
-            print(f"Warning: Feedforward size (numneurons) is 0 for model type {model_type}. Cannot reshape sequence activations.")
-        elif actual_elements != expected_elements:
-            print(f"Warning: Mismatch in activation dimensions. Expected {expected_elements} elements, got {actual_elements}. Cannot reshape sequence activations.")
+                # Reshape: The shape of hooked_activations might be complex depending on hook implementation
+                # Assuming hook_seq appends tensors of shape [batch_size, numneurons]
+                # And they are concatenated across batches correctly.
+                # Let's try concatenating first, then reshaping if necessary.
+
+                concatenated_activations = np.concatenate([act for act in hooked_activations], axis=0)
+
+                # Expected shape: (total_seqs, num_layers_hooked * numneurons) or similar
+                print(f"Debug: Concatenated activations shape: {concatenated_activations.shape}")
+                # Example reshape (needs verification based on hook logic):
+                # If each hook saves activations per layer: (num_hooks, num_seqs, num_neurons)
+                # We might need a different stacking/reshaping approach
+
+                # Placeholder: Assign concatenated directly if reshape logic is uncertain
+                embedding_dict['sequence_activations'] = concatenated_activations
+
+
+            except Exception as e:
+                 print(f"Error processing sequence activations: {e}")
+                 print(f"Hooked activations list length: {len(hooked_activations)}")
+                 if hooked_activations:
+                     print(f"Shape of first hooked activation tensor: {hooked_activations[0].shape}")
+
+
+        elif numneurons == 0:
+            print(f"Warning: Feedforward size (numneurons) is 0 for model type {model_type}. Cannot retrieve/reshape sequence activations.")
+        elif not hooked_activations:
+             print("Warning: get_sequence_activations was True, but no activations were hooked.")
+
 
     # Move this outside the sequence_activations check
     if get_sequence_embeddings == True:
@@ -639,7 +762,7 @@ def get_embeddings(seqs, model_path, config_attrs, seqlens, get_sequence_embeddi
 if __name__ == "__main__":
     args = get_embed_args()
 
-    # Unpack all args at the start
+    # Unpack necessary args
     model_path = args.model_path
     fasta_path = args.fasta_path
     pkl_out = args.pkl_out
@@ -647,8 +770,8 @@ if __name__ == "__main__":
     get_aa_embeddings = args.get_aa_embeddings
     get_sequence_activations = args.get_sequence_activations
     get_aa_activations = args.get_aa_activations
-    truncate = args.truncate
-    layers = args.layers
+    truncate_arg = args.truncate # Keep original arg name
+    layers_arg = args.layers # Keep original arg name
     padding = args.padding
     cpu_only = args.cpu_only
     strat = args.strat
@@ -659,104 +782,197 @@ if __name__ == "__main__":
     batch_size = args.batch_size
     all_layers = args.all_layers
 
-    if get_sequence_embeddings == False:
-         if get_aa_embeddings == False:
-             if get_sequence_activations == False:
-                 if get_aa_activations == False:
-                     print("Must add --get_sequence_embeddings and/or --get_aa_embeddings and/or --get_sequence_activations and/or --get_aa_activations, otherwise nothing to compute")
-                     exit(1)
 
-    # Get model configuration once
-    model_config_attrs = get_model_config_attributes(model_path)
+    if not any([get_sequence_embeddings, get_aa_embeddings, get_sequence_activations, get_aa_activations]):
+         print("Must specify at least one output type: --get_sequence_embeddings, --get_aa_embeddings, --get_sequence_activations, or --get_aa_activations.")
+         exit(1)
 
-    # Set truncation length if not specified
-    if not truncate:
-        truncate = model_config_attrs["max_sequence_length"] # Use fetched attribute
-        if truncate:
-            print(f"Setting maximum sequence length to {truncate} based on model type {model_config_attrs['model_type']}")
+    # Initialize variables to ensure they exist in scope, even if loading fails
+    model = None
+    tokenizer = None
+    model_config_attrs = None
+    half_precision_requested = False # What the user asked for (implicitly or explicitly)
+    half_precision_effective = False # What actually happened
+
+    # Determine if half precision should be attempted
+    if not cpu_only and torch.cuda.is_available():
+        half_precision_requested = True
+        print("CUDA available. Attempting to load model in half precision.")
+    elif cpu_only:
+        print("CPU only mode selected. Model will be loaded in full precision.")
+    else: # Not cpu_only but CUDA not available
+        print("CUDA not available. Model will be loaded in full precision.")
+
+
+    # Load model and get config attributes *once* upfront
+    print(f"Loading model from: {model_path}")
+    try:
+        # Pass output_hidden_states based on whether any embedding type is requested
+        output_hs_needed_for_load = get_sequence_embeddings or get_aa_embeddings
+        model, tokenizer, model_config_attrs = load_model(
+            model_path,
+            output_hidden_states=output_hs_needed_for_load,
+            output_attentions=False, # Assuming attentions are not needed based on args
+            half=half_precision_requested # Request half if applicable
+        )
+        # Check the actual precision of the loaded model
+        half_precision_effective = next(model.parameters()).dtype == torch.float16
+        print(f"Model, tokenizer, and config loaded. Effective precision: {'half' if half_precision_effective else 'full'}")
+
+    except Exception as e:
+        print(f"Fatal Error: Failed to load model, tokenizer, or config from {model_path}.")
+        print(f"Error details: {e}")
+        exit(1) # Ensure exit if loading fails
+
+    # --- Code below here only runs if load_model succeeded and variables are assigned ---
+
+    # Double-check that essential components were loaded
+    if model is None or tokenizer is None or model_config_attrs is None:
+        print("Fatal Error: Model, tokenizer, or config attributes were not loaded correctly after load_model call. Exiting.")
+        exit(1)
+
+
+    # Set truncation length based on config or argument override
+    truncate_len = truncate_arg # Use the value from args if provided
+    if truncate_len is None: # If not provided via args (it defaults to None)
+        truncate_len = model_config_attrs.get("max_sequence_length") # Use .get for safety
+        if truncate_len:
+            print(f"Setting maximum sequence length for truncation to {truncate_len} based on model config {model_config_attrs.get('model_type', 'N/A')}")
         else:
-            print("Warning: Could not determine max sequence length, sequences will not be truncated")
+            print("Warning: Could not determine max sequence length from config and none provided via --truncate. Sequences will not be truncated by default.")
+    elif truncate_len <= 0:
+         print("Truncate length must be positive. Disabling truncation.")
+         truncate_len = None # Disable truncation if user provides non-positive value
+    else:
+        print(f"Using truncation length provided via --truncate: {truncate_len}")
+        # Optional: Warn if user truncate value exceeds model max length
+        config_max_len = model_config_attrs.get("max_sequence_length")
+        if config_max_len and truncate_len > config_max_len:
+            print(f"Warning: User-specified truncation length ({truncate_len}) exceeds model's reported max length ({config_max_len}).")
 
+
+    # Parse FASTA using the determined truncation length
+    print(f"Parsing FASTA file: {fasta_path} with truncation={truncate_len}, padding={padding}")
     ids, sequences, sequences_spaced = parse_fasta_for_embed(fasta_path=fasta_path,
-                                                           truncate=truncate,
+                                                           truncate=truncate_len,
                                                            padding=padding)
 
-    print("First sequences")
-    seqlens = [len(x) for x in sequences]
+    if not sequences:
+        print("Error: No valid sequences loaded from FASTA file after filtering/truncation. Exiting.")
+        exit(1)
 
-    # If all_layers is True, override the layers parameter
-    # layers will be set correctly inside get_embeddings based on all_layers flag and config_attrs
-    if all_layers:
-        layers_arg = None # Pass None, get_embeddings will handle it
+    print(f"Sequences parsed. Number of sequences: {len(ids)}")
+    seqlens = [len(s) for s in sequences] # Get original lengths *after* truncation but *before* spacing/padding
+
+
+    # Call the modified get_embeddings function
+    print("Starting embedding generation...")
+    # Provide the first 5 arguments positionally
+    embedding_dict = get_embeddings(
+        model=model,                       # Pass loaded model
+        tokenizer=tokenizer,               # Pass loaded tokenizer
+        config_attrs=model_config_attrs,   # Pass config dict
+        seqs=sequences_spaced,             # Pass sequences with spaces
+        seqlens=seqlens,                   # Pass original lengths
+        # Keyword arguments for the rest
+        get_sequence_embeddings=get_sequence_embeddings,
+        get_aa_embeddings=get_aa_embeddings,
+        get_sequence_activations=get_sequence_activations,
+        get_aa_activations=get_aa_activations,
+        padding=padding,
+        layers=layers_arg, # CORRECTED: Use layers_arg here
+        all_layers=all_layers, # Pass all_layers flag
+        aa_pcamatrix_pkl=aa_pcamatrix_pkl,
+        sequence_pcamatrix_pkl=sequence_pcamatrix_pkl,
+        strat=strat,
+        cpu_only=cpu_only, # Pass CPU flag
+        half=half_precision_effective, # Pass effective half precision status
+        batch_size=batch_size
+    )
+
+
+    # Post-processing (PCA)
+    if embedding_dict: # Check if embeddings were generated
+        if sequence_target_dim and 'sequence_embeddings' in embedding_dict:
+           pkl_pca_out = "{}.sequence.{}dim.pcamatrix.pkl".format(fasta_path, sequence_target_dim)
+           print(f"Applying PCA to sequence embeddings (target dim: {sequence_target_dim})...")
+           embedding_dict['sequence_embeddings'] = control_pca(embedding_dict,
+                                                    'sequence_embeddings',
+                                                    pkl_pca_out=pkl_pca_out,
+                                                    target_dim=sequence_target_dim,
+                                                    max_train_sample_size=None) # Add sample size limit?
+
+        if aa_target_dim and 'aa_embeddings' in embedding_dict:
+           pkl_pca_out = "{}.aa.{}dim.pcamatrix.pkl".format(fasta_path, aa_target_dim)
+           print(f"Applying PCA to amino acid embeddings (target dim: {aa_target_dim})...")
+           # Note: control_pca for AA might need adjustments if input is 3D (batch, seq, features)
+           # Assuming control_pca can handle or needs reshaped input
+           embedding_dict['aa_embeddings'] = control_pca(embedding_dict,
+                                                    'aa_embeddings',
+                                                    pkl_pca_out=pkl_pca_out,
+                                                    target_dim=aa_target_dim,
+                                                    max_train_sample_size=500000) # Limit sample size for AA PCA
     else:
-        layers_arg = layers # Pass the user specified layers
+        print("Warning: Embedding dictionary is empty after get_embeddings call. Skipping PCA and output.")
 
-
-    embedding_dict = get_embeddings(sequences_spaced,
-                                    model_path,
-                                    config_attrs=model_config_attrs, # Pass the config dict
-                                    seqlens=seqlens,
-                                    get_sequence_embeddings=get_sequence_embeddings,
-                                    get_aa_embeddings=get_aa_embeddings,
-                                    get_sequence_activations=get_sequence_activations,
-                                    get_aa_activations=get_aa_activations,
-                                    padding=padding,
-                                    layers=layers_arg, # Use the potentially modified layers
-                                    all_layers=all_layers,
-                                    aa_pcamatrix_pkl=aa_pcamatrix_pkl,
-                                    sequence_pcamatrix_pkl=sequence_pcamatrix_pkl,
-                                    strat=strat,
-                                    cpu_only=cpu_only,
-                                    batch_size=batch_size)
-
-    # Reduce sequence dimension with a new pca transform
-    if sequence_target_dim:
-       pkl_pca_out = "{}.sequence.{}dim.pcamatrix.pkl".format(fasta_path, sequence_target_dim)
-       embedding_dict['sequence_embeddings'] = control_pca(embedding_dict,
-                                                'sequence_embeddings',
-                                                pkl_pca_out=pkl_pca_out,
-                                                target_dim=sequence_target_dim,
-                                                max_train_sample_size=None)
-
-    # Reduce aa dimension with a new pca transform
-    if aa_target_dim:
-       pkl_pca_out = "{}.aa.{}dim.pcamatrix.pkl".format(fasta_path, aa_target_dim)
-       embedding_dict['aa_embeddings'] = control_pca(embedding_dict,
-                                                'aa_embeddings',
-                                                pkl_pca_out=pkl_pca_out,
-                                                target_dim=aa_target_dim,
-                                                max_train_sample_size=None)
 
     # Store sequences & embeddings on disk
-    if pkl_out:
-        with open(pkl_out, "wb") as fOut:
-           pickle.dump(embedding_dict, fOut, protocol=pickle.HIGHEST_PROTOCOL)
+    if pkl_out and embedding_dict:
+        print(f"Saving results to {pkl_out}...")
+        try:
+            with open(pkl_out, "wb") as fOut:
+               pickle.dump(embedding_dict, fOut, protocol=pickle.HIGHEST_PROTOCOL)
 
-        pkl_log = "{}.description".format(pkl_out)
-        with open(pkl_log, "w") as pOut:
-            if get_aa_activations and 'aa_activations' in embedding_dict: # Check if key exists
-               pOut.write("Object {} dimensions: {}\n".format('aa_activations', embedding_dict['aa_activations'].shape))
+            pkl_log = "{}.description".format(pkl_out)
+            with open(pkl_log, "w") as pOut:
+                pOut.write(f"Embeddings generated from: {fasta_path}\n")
+                pOut.write(f"Using model: {model_path}\n")
+                pOut.write(f"Model type: {model_config_attrs.get('model_type', 'N/A')}\n") # Use .get safely
+                pOut.write(f"Effective precision: {'half' if half_precision_effective else 'full'}\n")
+                pOut.write(f"Layers used: {'All' if all_layers else layers_arg}\n")
+                pOut.write(f"Strategies used: {strat}\n")
+                pOut.write(f"Padding: {padding}\n")
+                pOut.write(f"Truncation length: {truncate_len if truncate_len else 'None'}\n") # Handle None case
+                pOut.write("-" * 20 + "\n")
+                pOut.write("Output objects and dimensions:\n")
 
-            if get_sequence_activations and 'sequence_activations' in embedding_dict: # Check if key exists
-               pOut.write("Object {} dimensions: {}\n".format('sequence_activations', embedding_dict['sequence_activations'].shape))
+                # Add shapes safely using .get() on embedding_dict
+                for key in ['aa_activations', 'sequence_activations', 'sequence_embeddings', 'sequence_embeddings_sigma', 'sequence_embeddings_swe', 'aa_embeddings']:
+                    data = embedding_dict.get(key)
+                    if data is not None:
+                        try:
+                             # Check if it's numpy array or tensor and print shape
+                             if isinstance(data, np.ndarray):
+                                 shape_str = str(data.shape)
+                             elif isinstance(data, torch.Tensor):
+                                 shape_str = str(data.shape)
+                             else:
+                                 shape_str = f"(Type: {type(data)})"
+                             pOut.write(f"  {key}: {shape_str}\n")
+                        except AttributeError:
+                            pOut.write(f"  {key}: (Error getting shape)\n")
+                    # else: key not present
 
-            if get_sequence_embeddings and 'sequence_embeddings' in embedding_dict: # Check if key exists
-               pOut.write("Object {} dimensions: {}\n".format('sequence_embeddings', embedding_dict['sequence_embeddings'].shape))
-               if "meansig" in strat and 'sequence_embeddings_sigma' in embedding_dict: # Check if key exists
-                    pOut.write("Object {} dimensions: {}\n".format('sequence_embeddings_sigma', embedding_dict['sequence_embeddings_sigma'].shape))
-               if "swe" in strat and 'sequence_embeddings_swe' in embedding_dict: # Check if key exists
-                    pOut.write("Object {} dimensions: {}\n".format('sequence_embeddings_swe', embedding_dict['sequence_embeddings_swe'].shape))
 
-            if get_aa_embeddings and 'aa_embeddings' in embedding_dict: # Check if key exists
-                pOut.write("Object {} dimensions: {}\n".format('aa_embeddings', embedding_dict['aa_embeddings'].shape))
+                pOut.write("-" * 20 + "\n")
+                pOut.write(f"Contains {len(ids)} sequences:\n")
+                seq_file = "{}.seqnames".format(pkl_out)
+                with open(seq_file, "w") as pOut2:
+                    for x in ids:
+                      pOut2.write("{}\n".format(x))
+                pOut.write(f"Full list of sequence IDs written to: {seq_file}\n")
 
-            pOut.write("Contains sequences:\n")
-            for x in ids:
-              pOut.write("{}\n".format(x))
+            print(f"Output saved to {pkl_out}")
+            print(f"Description saved to {pkl_log}")
 
-            seq_file = "{}.seqnames".format(pkl_out)
-            with open(seq_file, "w") as pOut2:
-                for x in ids:
-                  pOut2.write("{}\n".format(x))
+        except Exception as e:
+            print(f"Error saving output pickle/description: {e}")
+
+    elif not pkl_out:
+        print("No output pickle file specified (--outpickle). Results will not be saved.")
+    elif not embedding_dict:
+         print("Embedding dictionary is empty, nothing to save.")
+
+    print("Script finished.")
 
 
