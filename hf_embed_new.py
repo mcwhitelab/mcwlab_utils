@@ -1,4 +1,4 @@
-from transformers import AutoTokenizer, AutoModel, AutoConfig, T5Tokenizer, T5EncoderModel, AutoModelForMaskedLM, EsmTokenizer
+from transformers import AutoTokenizer, AutoModel, AutoConfig, T5Tokenizer, T5EncoderModel, AutoModelForMaskedLM, EsmTokenizer, AutoModelForCausalLM
 
 from pca_embeddings import control_pca, load_pcamatrix, apply_pca
 
@@ -80,7 +80,6 @@ def get_model_config_attributes(model_path):
     """
     model_config = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
     model_type = model_config.model_type
-    
     # Handle nested config for protst (has both a protein and a text component)
     if model_type == "protst" and hasattr(model_config, 'protein_config'):
         protein_config = model_config.protein_config
@@ -93,13 +92,18 @@ def get_model_config_attributes(model_path):
     if hasattr(protein_config, 'max_position_embeddings'):
         max_sequence_length = protein_config.max_position_embeddings
         print(f"Using max_position_embeddings ({max_sequence_length}) from config for max sequence length")
+    elif hasattr(protein_config, 'n_positions'): # For progen. This can probably be cleaned up a bit later
+        max_sequence_length = protein_config.n_positions
+        print(f"Using max_position_embeddings ({max_sequence_length}) from config for max sequence length")
+
     else:
         max_lengths = {
             "t5": 512,
             "bert": 1024,  # ProtBERT
             "ESMplusplus": 2048,
             "esm": 2048 if "esm2" in model_path.lower() else 1024,  # ESM-2 vs ESM-1
-            "protst": 1024  # ProST-ESM1b - Fallback value
+            "protst": 1024,  # ProST-ESM1b - Fallback value
+            "progen": 1024
         }
         max_sequence_length = max_lengths.get(model_type)
         if max_sequence_length:
@@ -115,6 +119,8 @@ def get_model_config_attributes(model_path):
         num_layers = protein_config.num_hidden_layers
     elif hasattr(protein_config, 'num_layers'):
         num_layers = protein_config.num_layers
+    elif hasattr(protein_config, 'n_layer'):
+        num_layers = protein_config.n_layer
     else:
         print(f"Warning: Could not determine number of layers for model type {model_type}")
         num_layers = None 
@@ -124,6 +130,8 @@ def get_model_config_attributes(model_path):
         hidden_size = protein_config.hidden_size
     elif hasattr(protein_config, 'd_model'):
         hidden_size = protein_config.d_model
+    elif hasattr(protein_config, 'embed_dim'):
+        hidden_size = protein_config.embed_dim
     else:
         print(f"Warning: Could not determine hidden size for model type {model_type}")
         hidden_size = None # Or a sensible default/error handling
@@ -136,6 +144,8 @@ def get_model_config_attributes(model_path):
     elif model_type in ["ESMplusplus"]: # Specific models known to potentially lack this
          ff_size = 0 # Keep default 0 if not found for these types
          print(f"Setting ff_size to 0 for model type {model_type} as attribute not found.")
+    elif hasattr(protein_config, 'n_inner'): # Progen uses 4 * the hidden size if not specified
+         ff_size = protein_config.n_inner if protein_config.n_inner is not None else 4*protein_config.n_embd
     else:
         print(f"Warning: Could not determine feedforward size for model type {model_type}")
         ff_size = None # Or a sensible default/error handling
@@ -214,7 +224,7 @@ def retrieve_aa_embeddings(model_output, model_type, layers=None, padding=0, seq
     
 
     # First trim the embeddings
-    if model_type in ["bert", "esm", "ESMplusplus", "protst"]:
+    if model_type in ["bert", "esm", "ESMplusplus", "protst", "progen"]:
         front_trim = 1 + padding
         end_trim = 1 + padding
     elif model_type == "t5" or model_type == "gpt2":
@@ -284,6 +294,12 @@ def load_model(model_path, output_hidden_states = True, output_attentions = Fals
         tokenizer = EsmTokenizer.from_pretrained("facebook/esm2_t33_650M_UR50D")
         model = full_model.protein_model
         print("Using ESM tokenizer for ProtST model")
+    elif model_type == "progen":
+        model = AutoModelForCausalLM.from_pretrained(model_path,
+                output_hidden_states=output_hidden_states,
+                output_attentions=output_attentions,
+                trust_remote_code=True)
+        tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     else:
         print("Automodel", model_path, model_type)
         model = AutoModel.from_pretrained(model_path, 
@@ -292,7 +308,7 @@ def load_model(model_path, output_hidden_states = True, output_attentions = Fals
                        trust_remote_code=True)
         tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
     
-    if model_type == "gpt2":
+    if model_type in ["gpt2", "progen"]:
          # This needs to be checked before using
          tokenizer.pad_token = tokenizer.eos_token
     if half == True:
@@ -383,7 +399,7 @@ def get_embeddings(seqs, model_path, config_attrs, seqlens, get_sequence_embeddi
     else:
          output_hidden_states = False
 
-    model, tokenizer, _ = load_model(model_path, output_hidden_states = output_hidden_states, return_config = False, half = half) # Don't need config again
+    model, tokenizer = load_model(model_path, output_hidden_states = output_hidden_states, return_config = False, half = half) # Don't need config again
     model_type = config_attrs["model_type"] # Use config_attrs
     print("This is a {} model".format(model_type))
     print("Model loaded")
