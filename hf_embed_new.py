@@ -213,7 +213,7 @@ def retrieve_aa_embeddings(model_output, model_type, layers=None, padding=0, seq
     '''
     # Get all hidden states
     hidden_states = model_output.hidden_states
-
+    print("hidden_states", hidden_states)
     # Handle different model types
     if model_type == "protst":
         # For ProtST, hidden_states is already the last layer's tensor
@@ -600,7 +600,7 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                 else: # General case for T5EncoderModel, AutoModel, etc.
                      output_hs = get_aa_embeddings or get_sequence_embeddings
                      model_output = model(**inputs, output_hidden_states=output_hs)
-                  
+                     print(model_output) 
 
                 # Ensure model_output.hidden_states is not None before proceeding
                 if not hasattr(model_output, 'hidden_states') or model_output.hidden_states is None:
