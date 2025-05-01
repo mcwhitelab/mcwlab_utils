@@ -95,7 +95,7 @@ def get_model_config_attributes(model_path):
         "bert": 1024,  # ProtBERT
         "ESMplusplus": 2048,
         "esm": 2048 if "esm2" in model_path.lower() else 1024,  # ESM-2 vs ESM-1
-        "protst": 1024  # Use 1024 like the archive script
+        "protst": 1024,  # Use 1024 like the archive script
         "progen": 1024
     }
     max_sequence_length = max_lengths.get(model_type)
