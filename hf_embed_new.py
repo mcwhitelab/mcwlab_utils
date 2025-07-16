@@ -108,7 +108,7 @@ def get_model_config_attributes(model_path):
         print(f"Warning: Model type {model_type} not in dictionary. Using max_position_embeddings ({max_sequence_length}) -2 from config.")
         print(f"If both CLS and SEP aren't used in the model, will cause CUDA errors")
     elif hasattr(protein_config, 'n_positions'):
-        # Alternative to max_position_embeddings that is probably an unnecessary inclusion, but progen uses this instead
+        # Alternative to max_position_embeddings that is probably an unnecessary inclusion, but progen2 uses this instead
         max_sequence_length = protein_config.n_positions
         print(f"Using n_positions ({max_sequence_length}) from config for max sequence length")
     else:
@@ -592,11 +592,15 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     # Main embedding loop
     with torch.inference_mode():
         for i, data in enumerate(data_loader): # Add enumerate for batch index
+            print(f"Data at {i}: {data}")
             batch_size_actual = data['input_ids'].shape[0] # Use actual batch size
             batch_seqlens = seqlens[count:count+batch_size_actual]
 
             # Run model
             inputs = {k: v.to(device) for k, v in data.items()}
+            print("Inputs:", inputs)
+            print("REMOVE THIS EXIT CALL FOR TESTING ONLY")
+            exit(0)
 
             # Adapt model call based on type and expected output
             try:
@@ -873,6 +877,7 @@ if __name__ == "__main__":
     ids, sequences, sequences_spaced = parse_fasta_for_embed(fasta_path=fasta_path,
                                                            truncate=truncate_len,
                                                            padding=padding)
+    print("Sequences after parse_fasta (REMOVE THIS):", sequences_spaced)  
 
     if not sequences:
         print("Error: No valid sequences loaded from FASTA file after filtering/truncation. Exiting.")

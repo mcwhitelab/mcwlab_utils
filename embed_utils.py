@@ -1,6 +1,12 @@
 import argparse
 from Bio import SeqIO
 
+import pickle
+
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset
+
 def get_embed_args():
 
     parser = argparse.ArgumentParser()
@@ -93,14 +99,13 @@ def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 
 
     return(ids, sequences, sequences_spaced)
 
-def set_device(model, config_attrs): 
+def set_device(model, config_attrs, cpu_only): 
     # Determine if half precision is effectively used (based on model state passed in)
     # Note: The 'half' parameter passed here is less critical now,
     # as the model's precision is determined when loaded.
     # We might still use it for SWE model loading later.
     model_is_half = next(model.parameters()).dtype == torch.float16
     print(f"Model received is in {'half' if model_is_half else 'full'} precision.")
-
 
     model_type = config_attrs["model_type"] # Use config_attrs passed in
     print("Using pre-loaded {} model".format(model_type))
@@ -133,3 +138,98 @@ def set_device(model, config_attrs):
                   model = model.to(device)
     else:
         print(f"Model already on device: {current_device}")
+
+    return device
+
+
+def write_pkl(pkl_out, fasta_path, model_path, model_config_attrs, half_precision_effective, all_layers, layers_arg, strat, padding, truncate_len, embedding_dict):
+    print(f"Saving results to {pkl_out}...")
+    try:
+        with open(pkl_out, "wb") as fOut:
+           pickle.dump(embedding_dict, fOut, protocol=pickle.HIGHEST_PROTOCOL)
+
+        pkl_log = "{}.description".format(pkl_out)
+        with open(pkl_log, "w") as pOut:
+            pOut.write(f"Embeddings generated from: {fasta_path}\n")
+            pOut.write(f"Using model: {model_path}\n")
+            pOut.write(f"Model type: {model_config_attrs.get('model_type', 'N/A')}\n") # Use .get safely
+            pOut.write(f"Effective precision: {'half' if half_precision_effective else 'full'}\n")
+            pOut.write(f"Layers used: {'All' if all_layers else layers_arg}\n")
+            pOut.write(f"Strategies used: {strat}\n")
+            pOut.write(f"Padding: {padding}\n")
+            pOut.write(f"Truncation length: {truncate_len if truncate_len else 'None'}\n") # Handle None case
+            pOut.write("-" * 20 + "\n")
+            pOut.write("Output objects and dimensions:\n")
+
+            # Add shapes safely using .get() on embedding_dict
+            for key in ['aa_activations', 'sequence_activations', 'sequence_embeddings', 'sequence_embeddings_sigma', 'sequence_embeddings_swe', 'aa_embeddings']:
+                data = embedding_dict.get(key)
+                if data is not None:
+                    try:
+                         # Check if it's numpy array or tensor and print shape
+                         if isinstance(data, np.ndarray):
+                             shape_str = str(data.shape)
+                         elif isinstance(data, torch.Tensor):
+                             shape_str = str(data.shape)
+                         else:
+                             shape_str = f"(Type: {type(data)})"
+                         pOut.write(f"  {key}: {shape_str}\n")
+                    except AttributeError:
+                        pOut.write(f"  {key}: (Error getting shape)\n")
+                # else: key not present
+
+
+            pOut.write("-" * 20 + "\n")
+            pOut.write(f"Contains {len(ids)} sequences:\n")
+            seq_file = "{}.seqnames".format(pkl_out)
+            with open(seq_file, "w") as pOut2:
+                for x in ids:
+                  pOut2.write("{}\n".format(x))
+            pOut.write(f"Full list of sequence IDs written to: {seq_file}\n")
+
+        print(f"Output saved to {pkl_out}")
+        print(f"Description saved to {pkl_log}")
+
+    except Exception as e:
+        print(f"Error saving output pickle/description: {e}")
+
+def determine_layers(config_attrs, all_layers, ):
+    num_total_layers = config_attrs["num_layers"]
+    if num_total_layers is None:
+         print("Error: num_layers is None. Cannot proceed.")
+         return {}
+
+    layers = [] # Defined so name is in scope for return
+    # If all_layers is True, use all available layers
+    if all_layers:
+        layers = list(range(num_total_layers))
+        print(f"Using all {num_total_layers} layers for embeddings: {layers}")
+    elif layers == [-1]:
+        layers = [num_total_layers - 1]
+        print(f"Using last layer ({layers[0]}) for embeddings.")
+    elif layers is not None:
+        # Adjust negative layer indices relative to num_total_layers
+        layers = [l if l >= 0 else num_total_layers + l for l in layers]
+        
+        # Check if any requested layers exceed the available layers
+        if any(l >= num_total_layers for l in layers):
+            print(f"Warning: Requested layers {layers} exceed available layers (0 to {num_total_layers-1})")
+            print(f"Falling back to using all {num_total_layers} available layers")
+            layers = list(range(num_total_layers))
+        else:
+            print(f"Using specified layers: {layers}")
+    elif layers is None:
+         layers = [num_total_layers - 1]
+         print(f"Defaulting to last layer ({layers[0]}) for embeddings.")
+    return layers
+
+
+class ListDataset(Dataset):
+    def __init__(self, data):
+        self.data = data
+
+    def __getitem__(self, index):
+        return self.data[index]
+
+    def __len__(self):
+        return len(self.data)
