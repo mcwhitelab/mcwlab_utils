@@ -341,53 +341,53 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
             fusion_aa_embed = fusion_embeddings['aa_embeddings'][fusion_idx]
             fusion_seq_embed = fusion_embeddings['sequence_embeddings'][fusion_idx]
 
-        # Extract protein fragments from fusion (0-indexed slicing)
-        p1_fusion_fragment = fusion_aa_embed[:p1_end_pos]  # Protein 1 fragment
-        p2_fusion_fragment = fusion_aa_embed[p1_end_pos:]  # Protein 2 fragment
+            # Extract protein fragments from fusion (0-indexed slicing)
+            p1_fusion_fragment = fusion_aa_embed[:p1_end_pos]  # Protein 1 fragment
+            p2_fusion_fragment = fusion_aa_embed[p1_end_pos:]  # Protein 2 fragment
 
-        # Compare fragments with original contexts
-        p1_fragment_similarity = compute_fragment_similarity(
-            original_aa_embeds[id1][:p1_cut],  # Original P1 fragment
-            p1_fusion_fragment
-        )
+            # Compare fragments with original contexts
+            p1_fragment_similarity = compute_fragment_similarity(
+                original_aa_embeds[id1][:p1_cut],  # Original P1 fragment
+                p1_fusion_fragment
+            )
 
-        p2_fragment_similarity = compute_fragment_similarity(
-            original_aa_embeds[id2][p2_cut-1:],  # Original P2 fragment (0-indexed)
-            p2_fusion_fragment
-        )
+            p2_fragment_similarity = compute_fragment_similarity(
+                original_aa_embeds[id2][p2_cut-1:],  # Original P2 fragment (0-indexed)
+                p2_fusion_fragment
+            )
 
-        # Compare full fusion to original proteins
-        fusion_to_p1_similarity = cosine_similarity(fusion_seq_embed, original_seq_embeds[id1])
-        fusion_to_p2_similarity = cosine_similarity(fusion_seq_embed, original_seq_embeds[id2])
+            # Compare full fusion to original proteins
+            fusion_to_p1_similarity = cosine_similarity(fusion_seq_embed, original_seq_embeds[id1])
+            fusion_to_p2_similarity = cosine_similarity(fusion_seq_embed, original_seq_embeds[id2])
 
-        # Store results
-        fusion_result = {
-            'fusion_id': fusion_id,
-            'p1_cut': p1_cut,
-            'p2_cut': p2_cut,
-            'fusion_length': len(fusion_seq),
-            'p1_fragment_length': p1_end_pos,
-            'p2_fragment_length': len(fusion_seq) - p1_end_pos,
+            # Store results
+            fusion_result = {
+                'fusion_id': fusion_id,
+                'p1_cut': p1_cut,
+                'p2_cut': p2_cut,
+                'fusion_length': len(fusion_seq),
+                'p1_fragment_length': p1_end_pos,
+                'p2_fragment_length': len(fusion_seq) - p1_end_pos,
 
-            # Fragment similarities (original context vs fusion context)
-            'p1_fragment_mean_similarity': p1_fragment_similarity['mean_similarity'],
-            'p1_fragment_std_similarity': p1_fragment_similarity['std_similarity'],
-            'p1_fragment_min_similarity': p1_fragment_similarity['min_similarity'],
-            'p1_fragment_max_similarity': p1_fragment_similarity['max_similarity'],
+                # Fragment similarities (original context vs fusion context)
+                'p1_fragment_mean_similarity': p1_fragment_similarity['mean_similarity'],
+                'p1_fragment_std_similarity': p1_fragment_similarity['std_similarity'],
+                'p1_fragment_min_similarity': p1_fragment_similarity['min_similarity'],
+                'p1_fragment_max_similarity': p1_fragment_similarity['max_similarity'],
 
-            'p2_fragment_mean_similarity': p2_fragment_similarity['mean_similarity'],
-            'p2_fragment_std_similarity': p2_fragment_similarity['std_similarity'],
-            'p2_fragment_min_similarity': p2_fragment_similarity['min_similarity'],
-            'p2_fragment_max_similarity': p2_fragment_similarity['max_similarity'],
+                'p2_fragment_mean_similarity': p2_fragment_similarity['mean_similarity'],
+                'p2_fragment_std_similarity': p2_fragment_similarity['std_similarity'],
+                'p2_fragment_min_similarity': p2_fragment_similarity['min_similarity'],
+                'p2_fragment_max_similarity': p2_fragment_similarity['max_similarity'],
 
-            # Full construct similarities
-            'fusion_to_p1_similarity': fusion_to_p1_similarity,
-            'fusion_to_p2_similarity': fusion_to_p2_similarity,
+                # Full construct similarities
+                'fusion_to_p1_similarity': fusion_to_p1_similarity,
+                'fusion_to_p2_similarity': fusion_to_p2_similarity,
 
-            # Per-residue data
-            'p1_per_residue_similarity': p1_fragment_similarity['per_residue_similarity'],
-            'p2_per_residue_similarity': p2_fragment_similarity['per_residue_similarity'],
-        }
+                # Per-residue data
+                'p1_per_residue_similarity': p1_fragment_similarity['per_residue_similarity'],
+                'p2_per_residue_similarity': p2_fragment_similarity['per_residue_similarity'],
+            }
 
             results['fusion_analyses'].append(fusion_result)
 
