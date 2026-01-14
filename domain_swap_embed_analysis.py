@@ -275,63 +275,71 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
     finally:
         os.unlink(original_fasta)
 
-    # Step 2: Process fusion constructs in batches
+    # Step 2: Process fusion constructs in batches (memory-efficient)
     print("\n" + "="*70)
     print(f"Step 2: Processing {len(fusion_constructs)} fusion constructs")
     print("="*70)
 
-    # Create all fusion sequences
-    fusion_seqs = {fid: fseq for fid, fseq, _, _, _, _ in fusion_constructs}
-    fusion_fasta = create_temp_fasta(fusion_seqs)
+    # Process in smaller chunks to avoid memory issues
+    chunk_size = 50  # Process 50 fusions at a time
+    num_chunks = (len(fusion_constructs) + chunk_size - 1) // chunk_size
 
-    try:
-        ids_fusion, seqs_fusion, seqs_spaced_fusion = parse_fasta_for_embed(
-            fusion_fasta,
-            truncate=config_attrs.get("max_sequence_length"),
-            padding=0
-        )
-        seqlens_fusion = [len(s) for s in seqs_fusion]
+    print(f"Processing in {num_chunks} chunks of {chunk_size} constructs each")
 
-        print(f"Embedding {len(ids_fusion)} fusion constructs...")
-        fusion_embeddings = get_embeddings(
-            model=model,
-            tokenizer=tokenizer,
-            config_attrs=config_attrs,
-            seqs=seqs_spaced_fusion,
-            seqlens=seqlens_fusion,
-            get_sequence_embeddings=True,
-            get_aa_embeddings=True,
-            get_sequence_activations=False,
-            get_aa_activations=False,
-            padding=0,
-            layers=args.layers,
-            all_layers=args.all_layers,
-            strat=args.strat,
-            cpu_only=args.cpu_only,
-            half=torch.cuda.is_available() and not args.cpu_only,
-            batch_size=args.batch_size
-        )
+    for chunk_idx in range(num_chunks):
+        start_idx = chunk_idx * chunk_size
+        end_idx = min(start_idx + chunk_size, len(fusion_constructs))
+        chunk_constructs = fusion_constructs[start_idx:end_idx]
 
-        # Map fusion IDs to embedding indices
-        fusion_id_to_idx = {fid: i for i, fid in enumerate(ids_fusion)}
+        print(f"\nChunk {chunk_idx + 1}/{num_chunks}: Processing constructs {start_idx + 1}-{end_idx}")
 
-    finally:
-        os.unlink(fusion_fasta)
+        # Create FASTA for this chunk
+        fusion_seqs = {fid: fseq for fid, fseq, _, _, _, _ in chunk_constructs}
+        fusion_fasta = create_temp_fasta(fusion_seqs)
 
-    # Step 3: Analyze each fusion construct
-    print("\n" + "="*70)
-    print("Step 3: Computing similarity metrics")
-    print("="*70)
+        try:
+            ids_fusion, seqs_fusion, seqs_spaced_fusion = parse_fasta_for_embed(
+                fusion_fasta,
+                truncate=config_attrs.get("max_sequence_length"),
+                padding=0
+            )
+            seqlens_fusion = [len(s) for s in seqs_fusion]
 
-    for construct_idx, (fusion_id, fusion_seq, p1_cut, p2_cut, p1_end_pos, p2_start_pos) in enumerate(fusion_constructs):
+            print(f"  Embedding {len(ids_fusion)} fusion constructs...")
+            fusion_embeddings = get_embeddings(
+                model=model,
+                tokenizer=tokenizer,
+                config_attrs=config_attrs,
+                seqs=seqs_spaced_fusion,
+                seqlens=seqlens_fusion,
+                get_sequence_embeddings=True,
+                get_aa_embeddings=True,
+                get_sequence_activations=False,
+                get_aa_activations=False,
+                padding=0,
+                layers=args.layers,
+                all_layers=args.all_layers,
+                strat=args.strat,
+                cpu_only=args.cpu_only,
+                half=torch.cuda.is_available() and not args.cpu_only,
+                batch_size=args.batch_size
+            )
 
-        if (construct_idx + 1) % 10 == 0:
-            print(f"  Processing construct {construct_idx + 1}/{len(fusion_constructs)}: {fusion_id}")
+            # Map fusion IDs to embedding indices for this chunk
+            fusion_id_to_idx = {fid: i for i, fid in enumerate(ids_fusion)}
 
-        # Get fusion embeddings
-        fusion_idx = fusion_id_to_idx[fusion_id]
-        fusion_aa_embed = fusion_embeddings['aa_embeddings'][fusion_idx]
-        fusion_seq_embed = fusion_embeddings['sequence_embeddings'][fusion_idx]
+        finally:
+            os.unlink(fusion_fasta)
+
+        # Step 3: Analyze each fusion construct in this chunk
+        print(f"  Computing similarity metrics...")
+
+        for construct_idx, (fusion_id, fusion_seq, p1_cut, p2_cut, p1_end_pos, p2_start_pos) in enumerate(chunk_constructs):
+
+            # Get fusion embeddings
+            fusion_idx = fusion_id_to_idx[fusion_id]
+            fusion_aa_embed = fusion_embeddings['aa_embeddings'][fusion_idx]
+            fusion_seq_embed = fusion_embeddings['sequence_embeddings'][fusion_idx]
 
         # Extract protein fragments from fusion (0-indexed slicing)
         p1_fusion_fragment = fusion_aa_embed[:p1_end_pos]  # Protein 1 fragment
@@ -381,7 +389,12 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
             'p2_per_residue_similarity': p2_fragment_similarity['per_residue_similarity'],
         }
 
-        results['fusion_analyses'].append(fusion_result)
+            results['fusion_analyses'].append(fusion_result)
+
+        # Free memory after processing this chunk
+        del fusion_embeddings
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
     print("\nAnalysis complete!")
     return results
