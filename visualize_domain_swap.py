@@ -109,9 +109,46 @@ def plot_combined_score_heatmap(df, output_file):
     )
 
 
+def plot_dual_swe_heatmap(df, output_file):
+    """
+    Plot side-by-side heatmaps for P1 and P2 SWE similarities.
+    """
+    pivot_p1 = create_pivot_table(df, 'p1_swe_similarity')
+    pivot_p2 = create_pivot_table(df, 'p2_swe_similarity')
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+
+    # P1 SWE similarity
+    sns.heatmap(pivot_p1, cmap='RdYlGn', vmin=0, vmax=1,
+                cbar_kws={'label': 'SWE Cosine Similarity'},
+                linewidths=0.5, linecolor='gray',
+                ax=axes[0])
+    axes[0].set_title('Protein 1 SWE Similarity\n(Distributional shape: N-term in fusion vs original)',
+                      fontsize=12, fontweight='bold', pad=15)
+    axes[0].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
+    axes[0].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
+
+    # P2 SWE similarity
+    sns.heatmap(pivot_p2, cmap='RdYlGn', vmin=0, vmax=1,
+                cbar_kws={'label': 'SWE Cosine Similarity'},
+                linewidths=0.5, linecolor='gray',
+                ax=axes[1])
+    axes[1].set_title('Protein 2 SWE Similarity\n(Distributional shape: C-term in fusion vs original)',
+                      fontsize=12, fontweight='bold', pad=15)
+    axes[1].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
+    axes[1].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=45, ha='right')
+
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
+    plt.close()
+    print(f"Saved: {output_file}")
+
+
 def plot_dual_heatmap(df, output_file):
     """
-    Plot side-by-side heatmaps for P1 and P2 fragment similarities.
+    Plot side-by-side heatmaps for P1 and P2 fragment similarities (per-residue).
     """
     pivot_p1 = create_pivot_table(df, 'p1_fragment_similarity')
     pivot_p2 = create_pivot_table(df, 'p2_fragment_similarity')
@@ -476,9 +513,13 @@ def main():
     print("1. Creating combined fragment similarity heatmap...")
     plot_combined_score_heatmap(df, output_dir / "01_combined_similarity_heatmap.png")
 
-    # 2. Dual heatmaps (P1 and P2 side by side)
-    print("2. Creating dual fragment similarity heatmaps...")
+    # 2. Dual heatmaps (P1 and P2 side by side) - per-residue
+    print("2. Creating dual fragment similarity heatmaps (per-residue)...")
     plot_dual_heatmap(df, output_dir / "02_fragment_similarity_dual_heatmap.png")
+
+    # 2b. Dual heatmaps for SWE similarities
+    print("2b. Creating dual SWE similarity heatmaps (distributional)...")
+    plot_dual_swe_heatmap(df, output_dir / "02b_swe_similarity_dual_heatmap.png")
 
     # 3. Full construct similarity heatmaps
     print("3. Creating full construct similarity heatmaps...")
@@ -510,7 +551,8 @@ def main():
     print(f"\nAll outputs saved to: {output_dir}")
     print("\nGenerated files:")
     print("  01_combined_similarity_heatmap.png - Overall best junction points")
-    print("  02_fragment_similarity_dual_heatmap.png - P1 and P2 fragment comparisons")
+    print("  02_fragment_similarity_dual_heatmap.png - P1 and P2 per-residue comparisons")
+    print("  02b_swe_similarity_dual_heatmap.png - P1 and P2 distributional shape (SWE)")
     print("  03_full_construct_similarity_heatmaps.png - Full fusion to parent similarities")
     print("  04_p1_vs_p2_scatter.png - Trade-off between P1 and P2 preservation")
     print("  05_top_constructs_bar.png - Top 20 constructs ranked")

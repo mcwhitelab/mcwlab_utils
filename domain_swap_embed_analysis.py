@@ -33,6 +33,7 @@ import pandas as pd
 
 # Import from existing embedding script
 from hf_embed_new import load_model, get_embeddings, parse_fasta_for_embed
+from model.architectures import SWE_Pooling
 
 np.random.seed(42)
 
@@ -168,6 +169,44 @@ def cosine_similarity(vec1, vec2):
     return dot_product / (norm1 * norm2 + 1e-9)
 
 
+def compute_swe_similarity(original_aa_embed, fusion_aa_embed, swe_pooler):
+    """
+    Compute SWE-based similarity between original and fusion fragments.
+
+    Uses Sliced Wasserstein Embedding to compare the distributional shape
+    of the embedding clouds.
+
+    Args:
+        original_aa_embed: Original per-residue embeddings (seq_len, hidden_dim)
+        fusion_aa_embed: Fusion per-residue embeddings (seq_len, hidden_dim)
+        swe_pooler: Pre-initialized SWE_Pooling module
+
+    Returns:
+        dict with SWE embeddings and similarity metrics
+    """
+    device = next(swe_pooler.parameters()).device
+
+    # Convert to torch tensors and add batch dimension
+    original_tensor = torch.from_numpy(original_aa_embed).unsqueeze(0).float().to(device)
+    fusion_tensor = torch.from_numpy(fusion_aa_embed).unsqueeze(0).float().to(device)
+
+    # Compute SWE embeddings
+    with torch.no_grad():
+        original_swe = swe_pooler(original_tensor).cpu().numpy().squeeze()
+        fusion_swe = swe_pooler(fusion_tensor).cpu().numpy().squeeze()
+
+    # Compute similarity between SWE embeddings
+    swe_cosine_sim = cosine_similarity(original_swe, fusion_swe)
+    swe_euclidean_dist = np.linalg.norm(original_swe - fusion_swe)
+
+    return {
+        'original_swe': original_swe,
+        'fusion_swe': fusion_swe,
+        'swe_cosine_similarity': swe_cosine_sim,
+        'swe_euclidean_distance': swe_euclidean_dist
+    }
+
+
 def compute_fragment_similarity(original_aa_embed, fusion_aa_embed):
     """
     Compute cosine similarity between original and fusion fragment embeddings.
@@ -275,9 +314,25 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
     finally:
         os.unlink(original_fasta)
 
-    # Step 2: Process fusion constructs in batches (memory-efficient)
+    # Step 2: Initialize SWE pooler (once, reused for all comparisons)
     print("\n" + "="*70)
-    print(f"Step 2: Processing {len(fusion_constructs)} fusion constructs")
+    print("Initializing SWE pooler for distributional comparisons...")
+    print("="*70)
+
+    device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu_only else "cpu")
+    hidden_dim = config_attrs['hidden_size']
+
+    swe_pooler = SWE_Pooling(
+        d_in=hidden_dim,
+        num_slices=hidden_dim,
+        num_ref_points=100,
+        freeze_swe=True
+    ).to(device)
+    print(f"SWE pooler initialized on {device}")
+
+    # Step 3: Process fusion constructs in batches (memory-efficient)
+    print("\n" + "="*70)
+    print(f"Step 3: Processing {len(fusion_constructs)} fusion constructs")
     print("="*70)
 
     # Process in smaller chunks to avoid memory issues
@@ -331,7 +386,7 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
         finally:
             os.unlink(fusion_fasta)
 
-        # Step 3: Analyze each fusion construct in this chunk
+        # Step 4: Analyze each fusion construct in this chunk
         print(f"  Computing similarity metrics...")
 
         for construct_idx, (fusion_id, fusion_seq, p1_cut, p2_cut, p1_end_pos, p2_start_pos) in enumerate(chunk_constructs):
@@ -366,7 +421,7 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 # Skip this construct if there's a mismatch
                 continue
 
-            # Compare fragments with original contexts
+            # Compare fragments with original contexts (per-residue)
             p1_fragment_similarity = compute_fragment_similarity(
                 original_p1_fragment,
                 p1_fusion_fragment
@@ -375,6 +430,19 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
             p2_fragment_similarity = compute_fragment_similarity(
                 original_p2_fragment,
                 p2_fusion_fragment
+            )
+
+            # Compare fragments using SWE (distributional shape)
+            p1_swe_similarity = compute_swe_similarity(
+                original_p1_fragment,
+                p1_fusion_fragment,
+                swe_pooler
+            )
+
+            p2_swe_similarity = compute_swe_similarity(
+                original_p2_fragment,
+                p2_fusion_fragment,
+                swe_pooler
             )
 
             # Compare full fusion to original proteins
@@ -390,7 +458,7 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 'p1_fragment_length': p1_end_pos,
                 'p2_fragment_length': len(fusion_seq) - p1_end_pos,
 
-                # Fragment similarities (original context vs fusion context)
+                # Fragment similarities - per-residue (original context vs fusion context)
                 'p1_fragment_mean_similarity': p1_fragment_similarity['mean_similarity'],
                 'p1_fragment_std_similarity': p1_fragment_similarity['std_similarity'],
                 'p1_fragment_min_similarity': p1_fragment_similarity['min_similarity'],
@@ -401,6 +469,12 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 'p2_fragment_min_similarity': p2_fragment_similarity['min_similarity'],
                 'p2_fragment_max_similarity': p2_fragment_similarity['max_similarity'],
 
+                # Fragment similarities - SWE (distributional shape)
+                'p1_swe_cosine_similarity': p1_swe_similarity['swe_cosine_similarity'],
+                'p1_swe_euclidean_distance': p1_swe_similarity['swe_euclidean_distance'],
+                'p2_swe_cosine_similarity': p2_swe_similarity['swe_cosine_similarity'],
+                'p2_swe_euclidean_distance': p2_swe_similarity['swe_euclidean_distance'],
+
                 # Full construct similarities
                 'fusion_to_p1_similarity': fusion_to_p1_similarity,
                 'fusion_to_p2_similarity': fusion_to_p2_similarity,
@@ -408,6 +482,12 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 # Per-residue data
                 'p1_per_residue_similarity': p1_fragment_similarity['per_residue_similarity'],
                 'p2_per_residue_similarity': p2_fragment_similarity['per_residue_similarity'],
+
+                # SWE embeddings (for further analysis)
+                'p1_original_swe': p1_swe_similarity['original_swe'],
+                'p1_fusion_swe': p1_swe_similarity['fusion_swe'],
+                'p2_original_swe': p2_swe_similarity['original_swe'],
+                'p2_fusion_swe': p2_swe_similarity['fusion_swe'],
             }
 
             results['fusion_analyses'].append(fusion_result)
@@ -430,8 +510,18 @@ def create_summary_dataframe(results):
             'p1_cut': fusion_result['p1_cut'],
             'p2_cut': fusion_result['p2_cut'],
             'fusion_length': fusion_result['fusion_length'],
+
+            # Per-residue similarities
             'p1_fragment_similarity': fusion_result['p1_fragment_mean_similarity'],
             'p2_fragment_similarity': fusion_result['p2_fragment_mean_similarity'],
+
+            # SWE similarities (distributional shape)
+            'p1_swe_similarity': fusion_result['p1_swe_cosine_similarity'],
+            'p2_swe_similarity': fusion_result['p2_swe_cosine_similarity'],
+            'p1_swe_distance': fusion_result['p1_swe_euclidean_distance'],
+            'p2_swe_distance': fusion_result['p2_swe_euclidean_distance'],
+
+            # Full construct similarities
             'fusion_to_p1_similarity': fusion_result['fusion_to_p1_similarity'],
             'fusion_to_p2_similarity': fusion_result['fusion_to_p2_similarity'],
         })
@@ -489,8 +579,10 @@ def save_results(results, output_prefix):
         for i, fusion in enumerate(sorted_fusions[:10], 1):
             f.write(f"{i}. {fusion['fusion_id']}\n")
             f.write(f"   P1 cut: {fusion['p1_cut']}, P2 cut: {fusion['p2_cut']}\n")
-            f.write(f"   P1 fragment similarity: {fusion['p1_fragment_mean_similarity']:.4f}\n")
-            f.write(f"   P2 fragment similarity: {fusion['p2_fragment_mean_similarity']:.4f}\n")
+            f.write(f"   P1 fragment similarity (per-residue): {fusion['p1_fragment_mean_similarity']:.4f}\n")
+            f.write(f"   P2 fragment similarity (per-residue): {fusion['p2_fragment_mean_similarity']:.4f}\n")
+            f.write(f"   P1 SWE similarity (distributional): {fusion['p1_swe_cosine_similarity']:.4f}\n")
+            f.write(f"   P2 SWE similarity (distributional): {fusion['p2_swe_cosine_similarity']:.4f}\n")
             f.write(f"   Fusion→P1 similarity: {fusion['fusion_to_p1_similarity']:.4f}\n")
             f.write(f"   Fusion→P2 similarity: {fusion['fusion_to_p2_similarity']:.4f}\n\n")
 
@@ -507,8 +599,12 @@ def save_results(results, output_prefix):
 
         f.write("Summary CSV columns:\n")
         f.write("- p1_cut, p2_cut: Junction positions\n")
-        f.write("- p1_fragment_similarity: Mean cosine similarity of P1 fragment (original vs fusion)\n")
-        f.write("- p2_fragment_similarity: Mean cosine similarity of P2 fragment (original vs fusion)\n")
+        f.write("- p1_fragment_similarity: Mean per-residue cosine similarity of P1 fragment (original vs fusion)\n")
+        f.write("- p2_fragment_similarity: Mean per-residue cosine similarity of P2 fragment (original vs fusion)\n")
+        f.write("- p1_swe_similarity: SWE-based cosine similarity of P1 (captures distributional shape)\n")
+        f.write("- p2_swe_similarity: SWE-based cosine similarity of P2 (captures distributional shape)\n")
+        f.write("- p1_swe_distance: SWE-based Euclidean distance of P1\n")
+        f.write("- p2_swe_distance: SWE-based Euclidean distance of P2\n")
         f.write("- fusion_to_p1_similarity: Cosine similarity of full fusion to original P1\n")
         f.write("- fusion_to_p2_similarity: Cosine similarity of full fusion to original P2\n")
 
