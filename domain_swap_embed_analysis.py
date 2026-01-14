@@ -293,12 +293,21 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
             batch_size=args.batch_size
         )
 
+        # Debug: Check the raw embeddings shape
+        print(f"\nDEBUG: Raw embeddings from get_embeddings:")
+        print(f"  ids_orig: {ids_orig}")
+        if 'aa_embeddings' in original_embeddings:
+            print(f"  aa_embeddings shape: {original_embeddings['aa_embeddings'].shape}")
+        if 'sequence_embeddings' in original_embeddings:
+            print(f"  sequence_embeddings shape: {original_embeddings['sequence_embeddings'].shape}")
+
         # Store original embeddings
         original_aa_embeds = {}
         original_seq_embeds = {}
         for i, seq_id in enumerate(ids_orig):
             if 'aa_embeddings' in original_embeddings:
                 original_aa_embeds[seq_id] = original_embeddings['aa_embeddings'][i]
+                print(f"  Storing {seq_id} (index {i}): shape {original_aa_embeds[seq_id].shape}")
             if 'sequence_embeddings' in original_embeddings:
                 original_seq_embeds[seq_id] = original_embeddings['sequence_embeddings'][i]
 
