@@ -297,17 +297,19 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
         print(f"\nDEBUG: Raw embeddings from get_embeddings:")
         print(f"  ids_orig: {ids_orig}")
         if 'aa_embeddings' in original_embeddings:
-            print(f"  aa_embeddings shape: {original_embeddings['aa_embeddings'].shape}")
+            print(f"  aa_embeddings shape (padded): {original_embeddings['aa_embeddings'].shape}")
         if 'sequence_embeddings' in original_embeddings:
             print(f"  sequence_embeddings shape: {original_embeddings['sequence_embeddings'].shape}")
 
-        # Store original embeddings
+        # Store original embeddings - TRIM TO ACTUAL SEQUENCE LENGTH
         original_aa_embeds = {}
         original_seq_embeds = {}
         for i, seq_id in enumerate(ids_orig):
             if 'aa_embeddings' in original_embeddings:
-                original_aa_embeds[seq_id] = original_embeddings['aa_embeddings'][i]
-                print(f"  Storing {seq_id} (index {i}): shape {original_aa_embeds[seq_id].shape}")
+                # Trim to actual sequence length (no padding)
+                actual_len = seqlens_orig[i]
+                original_aa_embeds[seq_id] = original_embeddings['aa_embeddings'][i, :actual_len, :]
+                print(f"  Storing {seq_id} (index {i}): trimmed from {original_embeddings['aa_embeddings'].shape[1]} to {actual_len}, final shape {original_aa_embeds[seq_id].shape}")
             if 'sequence_embeddings' in original_embeddings:
                 original_seq_embeds[seq_id] = original_embeddings['sequence_embeddings'][i]
 
@@ -389,8 +391,9 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 batch_size=args.batch_size
             )
 
-            # Map fusion IDs to embedding indices for this chunk
+            # Map fusion IDs to embedding indices and lengths for this chunk
             fusion_id_to_idx = {fid: i for i, fid in enumerate(ids_fusion)}
+            fusion_id_to_len = {fid: seqlens_fusion[i] for i, fid in enumerate(ids_fusion)}
 
         finally:
             os.unlink(fusion_fasta)
@@ -400,9 +403,10 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
 
         for construct_idx, (fusion_id, fusion_seq, p1_cut, p2_cut, p1_end_pos, p2_start_pos) in enumerate(chunk_constructs):
 
-            # Get fusion embeddings
+            # Get fusion embeddings - TRIM TO ACTUAL SEQUENCE LENGTH
             fusion_idx = fusion_id_to_idx[fusion_id]
-            fusion_aa_embed = fusion_embeddings['aa_embeddings'][fusion_idx]
+            fusion_len = fusion_id_to_len[fusion_id]
+            fusion_aa_embed = fusion_embeddings['aa_embeddings'][fusion_idx, :fusion_len, :]
             fusion_seq_embed = fusion_embeddings['sequence_embeddings'][fusion_idx]
 
             # Extract protein fragments from fusion (0-indexed slicing)
