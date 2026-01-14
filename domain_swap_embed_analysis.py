@@ -166,7 +166,12 @@ def cosine_similarity(vec1, vec2):
     dot_product = np.dot(vec1, vec2)
     norm1 = np.linalg.norm(vec1)
     norm2 = np.linalg.norm(vec2)
-    return dot_product / (norm1 * norm2 + 1e-9)
+
+    # Handle edge case where one or both vectors have zero norm
+    if norm1 < 1e-10 or norm2 < 1e-10:
+        return 0.0
+
+    return dot_product / (norm1 * norm2)
 
 
 def compute_swe_similarity(original_aa_embed, fusion_aa_embed, swe_pooler):
