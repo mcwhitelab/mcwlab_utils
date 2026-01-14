@@ -345,14 +345,35 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
             p1_fusion_fragment = fusion_aa_embed[:p1_end_pos]  # Protein 1 fragment
             p2_fusion_fragment = fusion_aa_embed[p1_end_pos:]  # Protein 2 fragment
 
+            # Get original fragments - need to handle the actual lengths
+            # p1_cut is 1-indexed, so seq1[:p1_cut] has length p1_cut
+            original_p1_fragment = original_aa_embeds[id1][:p1_cut]
+
+            # p2_cut is 1-indexed position where we start taking from seq2
+            # seq2[p2_cut-1:] in 0-indexed gives us from position p2_cut onwards
+            original_p2_fragment = original_aa_embeds[id2][p2_cut-1:]
+
+            # Debug: Check if shapes match
+            if original_p1_fragment.shape[0] != p1_fusion_fragment.shape[0]:
+                print(f"  Warning: P1 shape mismatch for {fusion_id}: original={original_p1_fragment.shape[0]}, fusion={p1_fusion_fragment.shape[0]}")
+                print(f"    p1_cut={p1_cut}, p1_end_pos={p1_end_pos}")
+
+            if original_p2_fragment.shape[0] != p2_fusion_fragment.shape[0]:
+                print(f"  Warning: P2 shape mismatch for {fusion_id}: original={original_p2_fragment.shape[0]}, fusion={p2_fusion_fragment.shape[0]}")
+                print(f"    p2_cut={p2_cut}, p2_start_pos={p2_start_pos}, fusion_len={len(fusion_seq)}")
+                print(f"    Expected P2 length: {len(seq2) - (p2_cut - 1)}")
+                print(f"    Actual original P2 embed length: {len(original_aa_embeds[id2])}")
+                # Skip this construct if there's a mismatch
+                continue
+
             # Compare fragments with original contexts
             p1_fragment_similarity = compute_fragment_similarity(
-                original_aa_embeds[id1][:p1_cut],  # Original P1 fragment
+                original_p1_fragment,
                 p1_fusion_fragment
             )
 
             p2_fragment_similarity = compute_fragment_similarity(
-                original_aa_embeds[id2][p2_cut-1:],  # Original P2 fragment (0-indexed)
+                original_p2_fragment,
                 p2_fusion_fragment
             )
 
