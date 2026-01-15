@@ -88,7 +88,7 @@ def plot_heatmap(data, title, output_file, cmap='viridis', vmin=None, vmax=None,
 
 def plot_combined_score_heatmap(df, output_file):
     """
-    Plot heatmap of combined fragment similarity score.
+    Plot heatmap of combined fragment similarity score (per-residue cosine).
 
     Combined score = mean of P1 and P2 fragment similarities.
     """
@@ -101,11 +101,32 @@ def plot_combined_score_heatmap(df, output_file):
 
     plot_heatmap(
         pivot,
-        title='Combined Fragment Similarity (P1 + P2)',
+        title='Combined Fragment Similarity - Per-residue Cosine (P1 + P2)',
         output_file=output_file,
         cmap='RdYlGn',
-        vmin=0, vmax=1,
         cbar_label='Mean Cosine Similarity'
+    )
+
+
+def plot_combined_swe_score_heatmap(df, output_file):
+    """
+    Plot heatmap of combined SWE similarity score.
+
+    Combined score = mean of P1 and P2 SWE similarities.
+    """
+    # Calculate combined SWE score
+    df['combined_swe_similarity'] = (
+        df['p1_swe_similarity'] + df['p2_swe_similarity']
+    ) / 2
+
+    pivot = create_pivot_table(df, 'combined_swe_similarity')
+
+    plot_heatmap(
+        pivot,
+        title='Combined Fragment Similarity - SWE (P1 + P2)',
+        output_file=output_file,
+        cmap='RdYlGn',
+        cbar_label='SWE Cosine Similarity'
     )
 
 
@@ -119,7 +140,7 @@ def plot_dual_swe_heatmap(df, output_file):
     fig, axes = plt.subplots(1, 2, figsize=(16, 7))
 
     # P1 SWE similarity
-    sns.heatmap(pivot_p1, cmap='RdYlGn', vmin=0, vmax=1,
+    sns.heatmap(pivot_p1, cmap='RdYlGn',
                 cbar_kws={'label': 'SWE Cosine Similarity'},
                 linewidths=0.5, linecolor='gray',
                 ax=axes[0])
@@ -130,7 +151,7 @@ def plot_dual_swe_heatmap(df, output_file):
     axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
 
     # P2 SWE similarity
-    sns.heatmap(pivot_p2, cmap='RdYlGn', vmin=0, vmax=1,
+    sns.heatmap(pivot_p2, cmap='RdYlGn',
                 cbar_kws={'label': 'SWE Cosine Similarity'},
                 linewidths=0.5, linecolor='gray',
                 ax=axes[1])
@@ -156,7 +177,7 @@ def plot_dual_heatmap(df, output_file):
     fig, axes = plt.subplots(1, 2, figsize=(16, 7))
 
     # P1 fragment similarity
-    sns.heatmap(pivot_p1, cmap='RdYlGn', vmin=0, vmax=1,
+    sns.heatmap(pivot_p1, cmap='RdYlGn',
                 cbar_kws={'label': 'Cosine Similarity'},
                 linewidths=0.5, linecolor='gray',
                 ax=axes[0])
@@ -167,7 +188,7 @@ def plot_dual_heatmap(df, output_file):
     axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
 
     # P2 fragment similarity
-    sns.heatmap(pivot_p2, cmap='RdYlGn', vmin=0, vmax=1,
+    sns.heatmap(pivot_p2, cmap='RdYlGn',
                 cbar_kws={'label': 'Cosine Similarity'},
                 linewidths=0.5, linecolor='gray',
                 ax=axes[1])
@@ -193,7 +214,7 @@ def plot_full_construct_heatmaps(df, output_file):
     fig, axes = plt.subplots(1, 2, figsize=(16, 7))
 
     # Fusion to P1
-    sns.heatmap(pivot_fus_p1, cmap='viridis', vmin=0, vmax=1,
+    sns.heatmap(pivot_fus_p1, cmap='viridis',
                 cbar_kws={'label': 'Cosine Similarity'},
                 linewidths=0.5, linecolor='gray',
                 ax=axes[0])
@@ -204,7 +225,7 @@ def plot_full_construct_heatmaps(df, output_file):
     axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
 
     # Fusion to P2
-    sns.heatmap(pivot_fus_p2, cmap='viridis', vmin=0, vmax=1,
+    sns.heatmap(pivot_fus_p2, cmap='viridis',
                 cbar_kws={'label': 'Cosine Similarity'},
                 linewidths=0.5, linecolor='gray',
                 ax=axes[1])
@@ -509,9 +530,13 @@ def main():
 
     print("Generating visualizations...\n")
 
-    # 1. Combined fragment similarity heatmap
-    print("1. Creating combined fragment similarity heatmap...")
-    plot_combined_score_heatmap(df, output_dir / "01_combined_similarity_heatmap.png")
+    # 1. Combined fragment similarity heatmap (per-residue cosine)
+    print("1. Creating combined fragment similarity heatmap (per-residue)...")
+    plot_combined_score_heatmap(df, output_dir / "01_combined_similarity_heatmap_cosine.png")
+
+    # 1b. Combined SWE similarity heatmap (distributional shape)
+    print("1b. Creating combined SWE similarity heatmap (distributional)...")
+    plot_combined_swe_score_heatmap(df, output_dir / "01b_combined_similarity_heatmap_swe.png")
 
     # 2. Dual heatmaps (P1 and P2 side by side) - per-residue
     print("2. Creating dual fragment similarity heatmaps (per-residue)...")
