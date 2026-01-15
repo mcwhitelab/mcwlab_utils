@@ -241,20 +241,30 @@ def plot_full_construct_heatmaps(df, output_file):
     print(f"Saved: {output_file}")
 
 
-def plot_scatter_p1_vs_p2(df, output_file):
+def plot_scatter_p1_vs_p2(df, output_file, use_swe=False):
     """
     Scatter plot of P1 fragment similarity vs P2 fragment similarity.
     Color by combined score.
+
+    Args:
+        use_swe: If True, use SWE similarities; if False, use per-residue similarities
     """
-    df['combined_similarity'] = (
-        df['p1_fragment_similarity'] + df['p2_fragment_similarity']
-    ) / 2
+    if use_swe:
+        p1_col = 'p1_swe_similarity'
+        p2_col = 'p2_swe_similarity'
+        title_suffix = '(SWE - Distributional)'
+    else:
+        p1_col = 'p1_fragment_similarity'
+        p2_col = 'p2_fragment_similarity'
+        title_suffix = '(Per-residue Cosine)'
+
+    df['combined_similarity'] = (df[p1_col] + df[p2_col]) / 2
 
     fig, ax = plt.subplots(figsize=(10, 8))
 
     scatter = ax.scatter(
-        df['p1_fragment_similarity'],
-        df['p2_fragment_similarity'],
+        df[p1_col],
+        df[p2_col],
         c=df['combined_similarity'],
         cmap='RdYlGn',
         s=50,
@@ -263,18 +273,18 @@ def plot_scatter_p1_vs_p2(df, output_file):
         linewidth=0.5
     )
 
-    # Add diagonal line (equal similarity)
-    ax.plot([0, 1], [0, 1], 'k--', alpha=0.3, linewidth=1, label='Equal similarity')
+    # Get min/max for diagonal line
+    vmin = min(df[p1_col].min(), df[p2_col].min())
+    vmax = max(df[p1_col].max(), df[p2_col].max())
+    ax.plot([vmin, vmax], [vmin, vmax], 'k--', alpha=0.3, linewidth=1, label='Equal similarity')
 
     # Colorbar
     cbar = plt.colorbar(scatter, ax=ax)
     cbar.set_label('Combined Similarity', fontsize=11, fontweight='bold')
 
-    ax.set_xlabel('Protein 1 Fragment Similarity', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Protein 2 Fragment Similarity', fontsize=12, fontweight='bold')
-    ax.set_title('Fragment Similarity Trade-off Analysis', fontsize=14, fontweight='bold', pad=15)
-    ax.set_xlim(0, 1)
-    ax.set_ylim(0, 1)
+    ax.set_xlabel(f'Protein 1 Fragment Similarity {title_suffix}', fontsize=12, fontweight='bold')
+    ax.set_ylabel(f'Protein 2 Fragment Similarity {title_suffix}', fontsize=12, fontweight='bold')
+    ax.set_title(f'Fragment Similarity Trade-off Analysis {title_suffix}', fontsize=14, fontweight='bold', pad=15)
     ax.grid(True, alpha=0.3)
     ax.legend(loc='lower right')
 
@@ -284,13 +294,23 @@ def plot_scatter_p1_vs_p2(df, output_file):
     print(f"Saved: {output_file}")
 
 
-def plot_top_constructs_bar(df, output_file, n_top=20):
+def plot_top_constructs_bar(df, output_file, n_top=20, use_swe=False):
     """
     Bar plot showing top N constructs by combined fragment similarity.
+
+    Args:
+        use_swe: If True, use SWE similarities; if False, use per-residue similarities
     """
-    df['combined_similarity'] = (
-        df['p1_fragment_similarity'] + df['p2_fragment_similarity']
-    ) / 2
+    if use_swe:
+        p1_col = 'p1_swe_similarity'
+        p2_col = 'p2_swe_similarity'
+        title_suffix = '(SWE - Distributional)'
+    else:
+        p1_col = 'p1_fragment_similarity'
+        p2_col = 'p2_fragment_similarity'
+        title_suffix = '(Per-residue Cosine)'
+
+    df['combined_similarity'] = (df[p1_col] + df[p2_col]) / 2
 
     # Sort and get top N
     top_df = df.nlargest(n_top, 'combined_similarity').copy()
@@ -303,9 +323,9 @@ def plot_top_constructs_bar(df, output_file, n_top=20):
     x_pos = np.arange(len(top_df))
     bar_width = 0.35
 
-    bars1 = ax.bar(x_pos - bar_width/2, top_df['p1_fragment_similarity'],
+    bars1 = ax.bar(x_pos - bar_width/2, top_df[p1_col],
                    bar_width, label='P1 fragment', color='steelblue', alpha=0.8)
-    bars2 = ax.bar(x_pos + bar_width/2, top_df['p2_fragment_similarity'],
+    bars2 = ax.bar(x_pos + bar_width/2, top_df[p2_col],
                    bar_width, label='P2 fragment', color='darkorange', alpha=0.8)
 
     # Add combined similarity as scatter points
@@ -314,12 +334,11 @@ def plot_top_constructs_bar(df, output_file, n_top=20):
                edgecolors='black', linewidth=1)
 
     ax.set_xlabel('Fusion Construct (P1 cut : P2 cut)', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Cosine Similarity', fontsize=12, fontweight='bold')
-    ax.set_title(f'Top {n_top} Fusion Constructs by Combined Fragment Similarity',
+    ax.set_ylabel('Similarity Score', fontsize=12, fontweight='bold')
+    ax.set_title(f'Top {n_top} Fusion Constructs by Combined Fragment Similarity {title_suffix}',
                  fontsize=14, fontweight='bold', pad=15)
     ax.set_xticks(x_pos)
     ax.set_xticklabels(top_df['label'], rotation=45, ha='right', fontsize=9)
-    ax.set_ylim(0, 1.0)
     ax.legend(loc='lower left', fontsize=10)
     ax.grid(axis='y', alpha=0.3)
 
@@ -550,13 +569,21 @@ def main():
     print("3. Creating full construct similarity heatmaps...")
     plot_full_construct_heatmaps(df, output_dir / "03_full_construct_similarity_heatmaps.png")
 
-    # 4. Scatter plot
-    print("4. Creating P1 vs P2 scatter plot...")
-    plot_scatter_p1_vs_p2(df, output_dir / "04_p1_vs_p2_scatter.png")
+    # 4. Scatter plot - per-residue
+    print("4. Creating P1 vs P2 scatter plot (per-residue)...")
+    plot_scatter_p1_vs_p2(df, output_dir / "04_p1_vs_p2_scatter_cosine.png", use_swe=False)
 
-    # 5. Top constructs bar plot
-    print("5. Creating top constructs bar plot...")
-    plot_top_constructs_bar(df, output_dir / "05_top_constructs_bar.png", n_top=20)
+    # 4b. Scatter plot - SWE
+    print("4b. Creating P1 vs P2 scatter plot (SWE)...")
+    plot_scatter_p1_vs_p2(df, output_dir / "04b_p1_vs_p2_scatter_swe.png", use_swe=True)
+
+    # 5. Top constructs bar plot - per-residue
+    print("5. Creating top constructs bar plot (per-residue)...")
+    plot_top_constructs_bar(df, output_dir / "05_top_constructs_bar_cosine.png", n_top=20, use_swe=False)
+
+    # 5b. Top constructs bar plot - SWE
+    print("5b. Creating top constructs bar plot (SWE)...")
+    plot_top_constructs_bar(df, output_dir / "05b_top_constructs_bar_swe.png", n_top=20, use_swe=True)
 
     # 6. Line profiles
     print("6. Creating line profile plots...")

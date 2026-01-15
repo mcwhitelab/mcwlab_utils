@@ -437,6 +437,24 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 print(f"    p1_fusion_fragment.shape={p1_fusion_fragment.shape}, original_p1_fragment.shape={original_p1_fragment.shape}")
                 print(f"    p2_fusion_fragment.shape={p2_fusion_fragment.shape}, original_p2_fragment.shape={original_p2_fragment.shape}")
 
+                # Check for NaN or zero values
+                print(f"\n  DEBUG: Checking fragment embedding quality:")
+                print(f"    original_p1_fragment: min={np.min(original_p1_fragment):.4f}, max={np.max(original_p1_fragment):.4f}, mean={np.mean(original_p1_fragment):.4f}")
+                print(f"    p1_fusion_fragment: min={np.min(p1_fusion_fragment):.4f}, max={np.max(p1_fusion_fragment):.4f}, mean={np.mean(p1_fusion_fragment):.4f}")
+                print(f"    original_p2_fragment: min={np.min(original_p2_fragment):.4f}, max={np.max(original_p2_fragment):.4f}, mean={np.mean(original_p2_fragment):.4f}")
+                print(f"    p2_fusion_fragment: min={np.min(p2_fusion_fragment):.4f}, max={np.max(p2_fusion_fragment):.4f}, mean={np.mean(p2_fusion_fragment):.4f}")
+
+                print(f"    original_p1_fragment has NaN: {np.isnan(original_p1_fragment).any()}")
+                print(f"    p1_fusion_fragment has NaN: {np.isnan(p1_fusion_fragment).any()}")
+                print(f"    original_p2_fragment has NaN: {np.isnan(original_p2_fragment).any()}")
+                print(f"    p2_fusion_fragment has NaN: {np.isnan(p2_fusion_fragment).any()}")
+
+                # Test per-residue similarity on first residue
+                test_cos = cosine_similarity(original_p1_fragment[0], p1_fusion_fragment[0])
+                print(f"\n  DEBUG: Test cosine similarity for P1 first residue: {test_cos}")
+                print(f"    original_p1_fragment[0] norm: {np.linalg.norm(original_p1_fragment[0]):.4f}")
+                print(f"    p1_fusion_fragment[0] norm: {np.linalg.norm(p1_fusion_fragment[0]):.4f}")
+
             # Debug: Check if shapes match - skip if mismatch
             if original_p1_fragment.shape[0] != p1_fusion_fragment.shape[0]:
                 print(f"  Warning: P1 shape mismatch for {fusion_id}: original={original_p1_fragment.shape[0]}, fusion={p1_fusion_fragment.shape[0]}")
@@ -460,6 +478,12 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 original_p2_fragment,
                 p2_fusion_fragment
             )
+
+            # Debug first construct
+            if chunk_idx == 0 and construct_idx == 0:
+                print(f"\n  DEBUG: Per-residue similarity results:")
+                print(f"    p1_fragment_similarity: {p1_fragment_similarity}")
+                print(f"    p2_fragment_similarity: {p2_fragment_similarity}")
 
             # Compare fragments using SWE (distributional shape)
             p1_swe_similarity = compute_swe_similarity(
