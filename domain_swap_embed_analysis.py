@@ -441,23 +441,26 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 print(f"    p1_fusion_fragment.shape={p1_fusion_fragment.shape}, original_p1_fragment.shape={original_p1_fragment.shape}")
                 print(f"    p2_fusion_fragment.shape={p2_fusion_fragment.shape}, original_p2_fragment.shape={original_p2_fragment.shape}")
 
-                # Check for NaN or zero values
+                # Check for NaN, inf, and extreme values
                 print(f"\n  DEBUG: Checking fragment embedding quality:")
-                print(f"    original_p1_fragment: min={np.min(original_p1_fragment):.4f}, max={np.max(original_p1_fragment):.4f}, mean={np.mean(original_p1_fragment):.4f}")
-                print(f"    p1_fusion_fragment: min={np.min(p1_fusion_fragment):.4f}, max={np.max(p1_fusion_fragment):.4f}, mean={np.mean(p1_fusion_fragment):.4f}")
-                print(f"    original_p2_fragment: min={np.min(original_p2_fragment):.4f}, max={np.max(original_p2_fragment):.4f}, mean={np.mean(original_p2_fragment):.4f}")
-                print(f"    p2_fusion_fragment: min={np.min(p2_fusion_fragment):.4f}, max={np.max(p2_fusion_fragment):.4f}, mean={np.mean(p2_fusion_fragment):.4f}")
+                print(f"    original_p1_fragment: min={np.min(original_p1_fragment):.4f}, max={np.max(original_p1_fragment):.4f}")
+                print(f"    p1_fusion_fragment: min={np.min(p1_fusion_fragment):.4f}, max={np.max(p1_fusion_fragment):.4f}")
+                print(f"    original_p2_fragment: min={np.min(original_p2_fragment):.4f}, max={np.max(original_p2_fragment):.4f}")
+                print(f"    p2_fusion_fragment: min={np.min(p2_fusion_fragment):.4f}, max={np.max(p2_fusion_fragment):.4f}")
 
-                print(f"    original_p1_fragment has NaN: {np.isnan(original_p1_fragment).any()}")
-                print(f"    p1_fusion_fragment has NaN: {np.isnan(p1_fusion_fragment).any()}")
-                print(f"    original_p2_fragment has NaN: {np.isnan(original_p2_fragment).any()}")
-                print(f"    p2_fusion_fragment has NaN: {np.isnan(p2_fusion_fragment).any()}")
+                print(f"    original_p1_fragment has inf: {np.isinf(original_p1_fragment).any()}")
+                print(f"    p1_fusion_fragment has inf: {np.isinf(p1_fusion_fragment).any()}")
+                print(f"    original_p2_fragment has inf: {np.isinf(original_p2_fragment).any()}")
+                print(f"    p2_fusion_fragment has inf: {np.isinf(p2_fusion_fragment).any()}")
 
-                # Test per-residue similarity on first residue
-                test_cos = cosine_similarity(original_p1_fragment[0], p1_fusion_fragment[0])
-                print(f"\n  DEBUG: Test cosine similarity for P1 first residue: {test_cos}")
-                print(f"    original_p1_fragment[0] norm: {np.linalg.norm(original_p1_fragment[0]):.4f}")
-                print(f"    p1_fusion_fragment[0] norm: {np.linalg.norm(p1_fusion_fragment[0]):.4f}")
+                # Test mean-pooled vectors
+                orig_p1_clipped = np.clip(original_p1_fragment, -1e4, 1e4)
+                fus_p1_clipped = np.clip(p1_fusion_fragment, -1e4, 1e4)
+                orig_p1_mean = np.mean(orig_p1_clipped, axis=0)
+                fus_p1_mean = np.mean(fus_p1_clipped, axis=0)
+                print(f"\n  DEBUG: Mean-pooled vectors after clipping:")
+                print(f"    original_p1_mean norm: {np.linalg.norm(orig_p1_mean):.4f}")
+                print(f"    fusion_p1_mean norm: {np.linalg.norm(fus_p1_mean):.4f}")
 
             # Debug: Check if shapes match - skip if mismatch
             if original_p1_fragment.shape[0] != p1_fusion_fragment.shape[0]:
@@ -485,7 +488,7 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
 
             # Debug first construct
             if chunk_idx == 0 and construct_idx == 0:
-                print(f"\n  DEBUG: Per-residue similarity results:")
+                print(f"\n  DEBUG: Mean-pooled cosine similarity results:")
                 print(f"    p1_fragment_similarity: {p1_fragment_similarity}")
                 print(f"    p2_fragment_similarity: {p2_fragment_similarity}")
 
