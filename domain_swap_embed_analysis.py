@@ -229,17 +229,25 @@ def compute_fragment_similarity(original_aa_embed, fusion_aa_embed):
     if original_aa_embed.shape != fusion_aa_embed.shape:
         raise ValueError(f"Shape mismatch: {original_aa_embed.shape} vs {fusion_aa_embed.shape}")
 
-    # Clip extreme values to prevent inf in mean
-    # ESM models can produce very large values in fp16
-    original_clipped = np.clip(original_aa_embed, -1e4, 1e4)
-    fusion_clipped = np.clip(fusion_aa_embed, -1e4, 1e4)
+    # Convert to float64 to prevent overflow during mean computation
+    # fp16 can overflow when summing many large values (529 residues * large values)
+    original_f64 = original_aa_embed.astype(np.float64)
+    fusion_f64 = fusion_aa_embed.astype(np.float64)
 
     # Mean pool across residues (axis=0)
-    original_mean = np.mean(original_clipped, axis=0)  # Shape: (hidden_dim,)
-    fusion_mean = np.mean(fusion_clipped, axis=0)      # Shape: (hidden_dim,)
+    original_mean = np.mean(original_f64, axis=0)  # Shape: (hidden_dim,)
+    fusion_mean = np.mean(fusion_f64, axis=0)      # Shape: (hidden_dim,)
+
+    # Check for inf/nan after mean
+    if np.isinf(original_mean).any() or np.isinf(fusion_mean).any():
+        return np.nan
+    if np.isnan(original_mean).any() or np.isnan(fusion_mean).any():
+        return np.nan
 
     # Compute cosine similarity between mean-pooled vectors
-    similarity = cosine_similarity(original_mean, fusion_mean)
+    # Convert back to float32 for cosine computation
+    similarity = cosine_similarity(original_mean.astype(np.float32),
+                                   fusion_mean.astype(np.float32))
 
     return similarity
 
