@@ -117,6 +117,9 @@ def plot_heatmap(data, title, output_file, cmap='viridis', vmin=None, vmax=None,
     ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
     ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
 
+    # Flip y-axis so it goes from high to low
+    ax.invert_yaxis()
+
     # Add amino acid labels if sequences provided
     if p2_seq:
         x_labels = [format_axis_label_with_aa(int(label.get_text()), p2_seq)
@@ -204,6 +207,7 @@ def plot_dual_swe_heatmap(df, output_file, p1_seq=None, p2_seq=None):
                       fontsize=12, fontweight='bold', pad=15)
     axes[0].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[0].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[0].invert_yaxis()
     add_aa_labels_to_axis(axes[0], p1_seq, p2_seq)
 
     # P2 SWE similarity
@@ -215,6 +219,7 @@ def plot_dual_swe_heatmap(df, output_file, p1_seq=None, p2_seq=None):
                       fontsize=12, fontweight='bold', pad=15)
     axes[1].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[1].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[1].invert_yaxis()
     add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
@@ -241,6 +246,7 @@ def plot_dual_heatmap(df, output_file, p1_seq=None, p2_seq=None):
                       fontsize=12, fontweight='bold', pad=15)
     axes[0].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[0].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[0].invert_yaxis()
     add_aa_labels_to_axis(axes[0], p1_seq, p2_seq)
 
     # P2 fragment similarity
@@ -252,6 +258,7 @@ def plot_dual_heatmap(df, output_file, p1_seq=None, p2_seq=None):
                       fontsize=12, fontweight='bold', pad=15)
     axes[1].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[1].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[1].invert_yaxis()
     add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
