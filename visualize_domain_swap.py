@@ -13,6 +13,7 @@ import seaborn as sns
 import argparse
 from pathlib import Path
 import pickle
+from Bio import SeqIO
 
 # Set style
 sns.set_style("whitegrid")
@@ -29,10 +30,48 @@ def get_args():
                         help="Optional: Input pickle file for additional analyses")
     parser.add_argument("-o", "--output", dest="output_dir", type=str, required=True,
                         help="Output directory for PNG files")
+    parser.add_argument("--protein1-fasta", dest="protein1_fasta", type=str, required=False,
+                        help="Protein 1 FASTA file (for amino acid labels)")
+    parser.add_argument("--protein2-fasta", dest="protein2_fasta", type=str, required=False,
+                        help="Protein 2 FASTA file (for amino acid labels)")
     parser.add_argument("--dpi", dest="dpi", type=int, default=300,
                         help="DPI for output images (default: 300)")
 
     return parser.parse_args()
+
+
+def load_sequence_from_fasta(fasta_file):
+    """Load single sequence from FASTA file."""
+    if not fasta_file:
+        return None
+    for record in SeqIO.parse(fasta_file, "fasta"):
+        return str(record.seq)
+    return None
+
+
+def format_axis_label_with_aa(position, sequence):
+    """Format axis label with position and amino acid."""
+    if sequence and 1 <= position <= len(sequence):
+        aa = sequence[position - 1]  # Convert to 0-indexed
+        return f"{position}\n{aa}"
+    return str(position)
+
+
+def add_aa_labels_to_axis(ax, p1_seq=None, p2_seq=None):
+    """Add amino acid labels to existing heatmap axes."""
+    if p2_seq:
+        x_labels = [format_axis_label_with_aa(int(label.get_text()), p2_seq)
+                   for label in ax.get_xticklabels()]
+        ax.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=8)
+    else:
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+
+    if p1_seq:
+        y_labels = [format_axis_label_with_aa(int(label.get_text()), p1_seq)
+                   for label in ax.get_yticklabels()]
+        ax.set_yticklabels(y_labels, rotation=0, fontsize=8)
+    else:
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
 
 
 def create_pivot_table(df, value_column):
@@ -52,7 +91,7 @@ def create_pivot_table(df, value_column):
 
 def plot_heatmap(data, title, output_file, cmap='viridis', vmin=None, vmax=None,
                  xlabel='Protein 2 cut position', ylabel='Protein 1 cut position',
-                 cbar_label='Similarity'):
+                 cbar_label='Similarity', p1_seq=None, p2_seq=None):
     """
     Create and save a heatmap.
 
@@ -64,8 +103,10 @@ def plot_heatmap(data, title, output_file, cmap='viridis', vmin=None, vmax=None,
         vmin, vmax: Color scale limits
         xlabel, ylabel: Axis labels
         cbar_label: Colorbar label
+        p1_seq: Protein 1 sequence (for amino acid labels)
+        p2_seq: Protein 2 sequence (for amino acid labels)
     """
-    fig, ax = plt.subplots(figsize=(10, 8))
+    fig, ax = plt.subplots(figsize=(12, 10))
 
     sns.heatmap(data, cmap=cmap, vmin=vmin, vmax=vmax,
                 cbar_kws={'label': cbar_label},
@@ -76,9 +117,20 @@ def plot_heatmap(data, title, output_file, cmap='viridis', vmin=None, vmax=None,
     ax.set_ylabel(ylabel, fontsize=12, fontweight='bold')
     ax.set_title(title, fontsize=14, fontweight='bold', pad=20)
 
-    # Rotate tick labels for readability
-    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
-    ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
+    # Add amino acid labels if sequences provided
+    if p2_seq:
+        x_labels = [format_axis_label_with_aa(int(label.get_text()), p2_seq)
+                   for label in ax.get_xticklabels()]
+        ax.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=8)
+    else:
+        ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+
+    if p1_seq:
+        y_labels = [format_axis_label_with_aa(int(label.get_text()), p1_seq)
+                   for label in ax.get_yticklabels()]
+        ax.set_yticklabels(y_labels, rotation=0, fontsize=8)
+    else:
+        ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
@@ -86,7 +138,7 @@ def plot_heatmap(data, title, output_file, cmap='viridis', vmin=None, vmax=None,
     print(f"Saved: {output_file}")
 
 
-def plot_combined_score_heatmap(df, output_file):
+def plot_combined_score_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     """
     Plot heatmap of combined fragment similarity score (per-residue cosine).
 
@@ -104,11 +156,13 @@ def plot_combined_score_heatmap(df, output_file):
         title='Combined Fragment Similarity - Per-residue Cosine (P1 + P2)',
         output_file=output_file,
         cmap='RdYlGn',
-        cbar_label='Mean Cosine Similarity'
+        cbar_label='Mean Cosine Similarity',
+        p1_seq=p1_seq,
+        p2_seq=p2_seq
     )
 
 
-def plot_combined_swe_score_heatmap(df, output_file):
+def plot_combined_swe_score_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     """
     Plot heatmap of combined SWE similarity score.
 
@@ -126,18 +180,20 @@ def plot_combined_swe_score_heatmap(df, output_file):
         title='Combined Fragment Similarity - SWE (P1 + P2)',
         output_file=output_file,
         cmap='RdYlGn',
-        cbar_label='SWE Cosine Similarity'
+        cbar_label='SWE Cosine Similarity',
+        p1_seq=p1_seq,
+        p2_seq=p2_seq
     )
 
 
-def plot_dual_swe_heatmap(df, output_file):
+def plot_dual_swe_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     """
     Plot side-by-side heatmaps for P1 and P2 SWE similarities.
     """
     pivot_p1 = create_pivot_table(df, 'p1_swe_similarity')
     pivot_p2 = create_pivot_table(df, 'p2_swe_similarity')
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    fig, axes = plt.subplots(1, 2, figsize=(20, 9))
 
     # P1 SWE similarity
     sns.heatmap(pivot_p1, cmap='RdYlGn',
@@ -148,7 +204,7 @@ def plot_dual_swe_heatmap(df, output_file):
                       fontsize=12, fontweight='bold', pad=15)
     axes[0].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[0].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
-    axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
+    add_aa_labels_to_axis(axes[0], p1_seq, p2_seq)
 
     # P2 SWE similarity
     sns.heatmap(pivot_p2, cmap='RdYlGn',
@@ -159,7 +215,7 @@ def plot_dual_swe_heatmap(df, output_file):
                       fontsize=12, fontweight='bold', pad=15)
     axes[1].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[1].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
-    axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=45, ha='right')
+    add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
@@ -167,14 +223,14 @@ def plot_dual_swe_heatmap(df, output_file):
     print(f"Saved: {output_file}")
 
 
-def plot_dual_heatmap(df, output_file):
+def plot_dual_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     """
     Plot side-by-side heatmaps for P1 and P2 fragment similarities (per-residue).
     """
     pivot_p1 = create_pivot_table(df, 'p1_fragment_similarity')
     pivot_p2 = create_pivot_table(df, 'p2_fragment_similarity')
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    fig, axes = plt.subplots(1, 2, figsize=(20, 9))
 
     # P1 fragment similarity
     sns.heatmap(pivot_p1, cmap='RdYlGn',
@@ -185,7 +241,7 @@ def plot_dual_heatmap(df, output_file):
                       fontsize=12, fontweight='bold', pad=15)
     axes[0].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[0].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
-    axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
+    add_aa_labels_to_axis(axes[0], p1_seq, p2_seq)
 
     # P2 fragment similarity
     sns.heatmap(pivot_p2, cmap='RdYlGn',
@@ -196,7 +252,7 @@ def plot_dual_heatmap(df, output_file):
                       fontsize=12, fontweight='bold', pad=15)
     axes[1].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[1].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
-    axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=45, ha='right')
+    add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
@@ -559,23 +615,32 @@ def main():
     df = pd.read_csv(args.input_csv)
     print(f"Loaded {len(df)} fusion constructs\n")
 
+    # Load sequences for amino acid labels
+    p1_seq = load_sequence_from_fasta(args.protein1_fasta)
+    p2_seq = load_sequence_from_fasta(args.protein2_fasta)
+    if p1_seq:
+        print(f"Loaded Protein 1 sequence: {len(p1_seq)} aa")
+    if p2_seq:
+        print(f"Loaded Protein 2 sequence: {len(p2_seq)} aa")
+    print()
+
     print("Generating visualizations...\n")
 
     # 1. Combined fragment similarity heatmap (per-residue cosine)
     print("1. Creating combined fragment similarity heatmap (per-residue)...")
-    plot_combined_score_heatmap(df, output_dir / "01_combined_similarity_heatmap_cosine.png")
+    plot_combined_score_heatmap(df, output_dir / "01_combined_similarity_heatmap_cosine.png", p1_seq, p2_seq)
 
     # 1b. Combined SWE similarity heatmap (distributional shape)
     print("1b. Creating combined SWE similarity heatmap (distributional)...")
-    plot_combined_swe_score_heatmap(df, output_dir / "01b_combined_similarity_heatmap_swe.png")
+    plot_combined_swe_score_heatmap(df, output_dir / "01b_combined_similarity_heatmap_swe.png", p1_seq, p2_seq)
 
     # 2. Dual heatmaps (P1 and P2 side by side) - per-residue
     print("2. Creating dual fragment similarity heatmaps (per-residue)...")
-    plot_dual_heatmap(df, output_dir / "02_fragment_similarity_dual_heatmap.png")
+    plot_dual_heatmap(df, output_dir / "02_fragment_similarity_dual_heatmap.png", p1_seq, p2_seq)
 
     # 2b. Dual heatmaps for SWE similarities
     print("2b. Creating dual SWE similarity heatmaps (distributional)...")
-    plot_dual_swe_heatmap(df, output_dir / "02b_swe_similarity_dual_heatmap.png")
+    plot_dual_swe_heatmap(df, output_dir / "02b_swe_similarity_dual_heatmap.png", p1_seq, p2_seq)
 
     # 3. Full construct similarity heatmaps
     print("3. Creating full construct similarity heatmaps...")
