@@ -214,30 +214,29 @@ def compute_swe_similarity(original_aa_embed, fusion_aa_embed, swe_pooler):
 
 def compute_fragment_similarity(original_aa_embed, fusion_aa_embed):
     """
-    Compute cosine similarity between original and fusion fragment embeddings.
+    Compute cosine similarity between mean-pooled fragment embeddings.
+
+    Takes the mean across residues for each fragment, then computes cosine similarity
+    between the two mean-pooled vectors.
 
     Args:
         original_aa_embed: Original per-residue embeddings (seq_len, hidden_dim)
         fusion_aa_embed: Fusion per-residue embeddings (seq_len, hidden_dim)
 
     Returns:
-        dict with per-residue and mean similarities
+        float: Cosine similarity between mean-pooled embeddings
     """
     if original_aa_embed.shape != fusion_aa_embed.shape:
         raise ValueError(f"Shape mismatch: {original_aa_embed.shape} vs {fusion_aa_embed.shape}")
 
-    # Per-residue cosine similarity
-    per_residue_sim = np.zeros(original_aa_embed.shape[0])
-    for i in range(original_aa_embed.shape[0]):
-        per_residue_sim[i] = cosine_similarity(original_aa_embed[i], fusion_aa_embed[i])
+    # Mean pool across residues (axis=0)
+    original_mean = np.mean(original_aa_embed, axis=0)  # Shape: (hidden_dim,)
+    fusion_mean = np.mean(fusion_aa_embed, axis=0)      # Shape: (hidden_dim,)
 
-    return {
-        'per_residue_similarity': per_residue_sim,
-        'mean_similarity': np.mean(per_residue_sim),
-        'std_similarity': np.std(per_residue_sim),
-        'min_similarity': np.min(per_residue_sim),
-        'max_similarity': np.max(per_residue_sim)
-    }
+    # Compute cosine similarity between mean-pooled vectors
+    similarity = cosine_similarity(original_mean, fusion_mean)
+
+    return similarity
 
 
 def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id2,
@@ -511,16 +510,9 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 'p1_fragment_length': p1_end_pos,
                 'p2_fragment_length': len(fusion_seq) - p1_end_pos,
 
-                # Fragment similarities - per-residue (original context vs fusion context)
-                'p1_fragment_mean_similarity': p1_fragment_similarity['mean_similarity'],
-                'p1_fragment_std_similarity': p1_fragment_similarity['std_similarity'],
-                'p1_fragment_min_similarity': p1_fragment_similarity['min_similarity'],
-                'p1_fragment_max_similarity': p1_fragment_similarity['max_similarity'],
-
-                'p2_fragment_mean_similarity': p2_fragment_similarity['mean_similarity'],
-                'p2_fragment_std_similarity': p2_fragment_similarity['std_similarity'],
-                'p2_fragment_min_similarity': p2_fragment_similarity['min_similarity'],
-                'p2_fragment_max_similarity': p2_fragment_similarity['max_similarity'],
+                # Fragment similarities - mean-pooled cosine (original context vs fusion context)
+                'p1_fragment_similarity': p1_fragment_similarity,
+                'p2_fragment_similarity': p2_fragment_similarity,
 
                 # Fragment similarities - SWE (distributional shape)
                 'p1_swe_cosine_similarity': p1_swe_similarity['swe_cosine_similarity'],
@@ -531,10 +523,6 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 # Full construct similarities
                 'fusion_to_p1_similarity': fusion_to_p1_similarity,
                 'fusion_to_p2_similarity': fusion_to_p2_similarity,
-
-                # Per-residue data
-                'p1_per_residue_similarity': p1_fragment_similarity['per_residue_similarity'],
-                'p2_per_residue_similarity': p2_fragment_similarity['per_residue_similarity'],
 
                 # SWE embeddings (for further analysis)
                 'p1_original_swe': p1_swe_similarity['original_swe'],
@@ -564,9 +552,9 @@ def create_summary_dataframe(results):
             'p2_cut': fusion_result['p2_cut'],
             'fusion_length': fusion_result['fusion_length'],
 
-            # Per-residue similarities
-            'p1_fragment_similarity': fusion_result['p1_fragment_mean_similarity'],
-            'p2_fragment_similarity': fusion_result['p2_fragment_mean_similarity'],
+            # Mean-pooled cosine similarities
+            'p1_fragment_similarity': fusion_result['p1_fragment_similarity'],
+            'p2_fragment_similarity': fusion_result['p2_fragment_similarity'],
 
             # SWE similarities (distributional shape)
             'p1_swe_similarity': fusion_result['p1_swe_cosine_similarity'],
