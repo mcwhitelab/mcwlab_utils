@@ -323,30 +323,36 @@ def plot_top_constructs_bar(df, output_file, n_top=20, use_swe=False):
     x_pos = np.arange(len(top_df))
     bar_width = 0.35
 
-    bars1 = ax.bar(x_pos - bar_width/2, top_df[p1_col],
+    # Transform to dissimilarity (1 - similarity) for better log-scale visualization
+    # This makes small differences in high similarity values (0.99x) more visible
+    p1_dissim = 1 - top_df[p1_col]
+    p2_dissim = 1 - top_df[p2_col]
+    combined_dissim = 1 - top_df['combined_similarity']
+
+    bars1 = ax.bar(x_pos - bar_width/2, p1_dissim,
                    bar_width, label='P1 fragment', color='steelblue', alpha=0.8)
-    bars2 = ax.bar(x_pos + bar_width/2, top_df[p2_col],
+    bars2 = ax.bar(x_pos + bar_width/2, p2_dissim,
                    bar_width, label='P2 fragment', color='darkorange', alpha=0.8)
 
-    # Add combined similarity as scatter points
-    ax.scatter(x_pos, top_df['combined_similarity'],
+    # Add combined dissimilarity as scatter points
+    ax.scatter(x_pos, combined_dissim,
                color='red', s=100, marker='D', label='Combined', zorder=5,
                edgecolors='black', linewidth=1)
 
     ax.set_xlabel('Fusion Construct (P1 cut : P2 cut)', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Similarity Score', fontsize=12, fontweight='bold')
-    ax.set_title(f'Top {n_top} Fusion Constructs by Combined Fragment Similarity {title_suffix}',
+    ax.set_ylabel('Dissimilarity (1 - Similarity, log scale)', fontsize=12, fontweight='bold')
+    ax.set_title(f'Top {n_top} Fusion Constructs by Combined Fragment Similarity {title_suffix}\n(Lower is better)',
                  fontsize=14, fontweight='bold', pad=15)
     ax.set_xticks(x_pos)
     ax.set_xticklabels(top_df['label'], rotation=45, ha='right', fontsize=9)
-    ax.legend(loc='lower left', fontsize=10)
-    ax.grid(axis='y', alpha=0.3)
+    ax.legend(loc='upper left', fontsize=10)
+    ax.grid(axis='y', alpha=0.3, which='both')
 
     # Use log scale for y-axis to better visualize differences in high-similarity values
-    # Transform: 1 - similarity to show "distance from perfect"
-    # This makes small differences in 0.99x range more visible
     ax.set_yscale('log')
-    ax.set_ylabel('Similarity Score (log scale)', fontsize=12, fontweight='bold')
+
+    # Invert y-axis so lower dissimilarity (better) is at the top
+    ax.invert_yaxis()
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')

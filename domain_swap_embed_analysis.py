@@ -229,9 +229,14 @@ def compute_fragment_similarity(original_aa_embed, fusion_aa_embed):
     if original_aa_embed.shape != fusion_aa_embed.shape:
         raise ValueError(f"Shape mismatch: {original_aa_embed.shape} vs {fusion_aa_embed.shape}")
 
+    # Clip extreme values to prevent inf in mean
+    # ESM models can produce very large values in fp16
+    original_clipped = np.clip(original_aa_embed, -1e4, 1e4)
+    fusion_clipped = np.clip(fusion_aa_embed, -1e4, 1e4)
+
     # Mean pool across residues (axis=0)
-    original_mean = np.mean(original_aa_embed, axis=0)  # Shape: (hidden_dim,)
-    fusion_mean = np.mean(fusion_aa_embed, axis=0)      # Shape: (hidden_dim,)
+    original_mean = np.mean(original_clipped, axis=0)  # Shape: (hidden_dim,)
+    fusion_mean = np.mean(fusion_clipped, axis=0)      # Shape: (hidden_dim,)
 
     # Compute cosine similarity between mean-pooled vectors
     similarity = cosine_similarity(original_mean, fusion_mean)
