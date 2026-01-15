@@ -285,6 +285,7 @@ def plot_full_construct_heatmaps(df, output_file):
                       fontsize=12, fontweight='bold', pad=15)
     axes[0].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[0].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[0].invert_yaxis()
     axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
 
     # Fusion to P2
@@ -296,6 +297,7 @@ def plot_full_construct_heatmaps(df, output_file):
                       fontsize=12, fontweight='bold', pad=15)
     axes[1].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[1].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[1].invert_yaxis()
     axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=45, ha='right')
 
     plt.tight_layout()
