@@ -426,17 +426,28 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
             # seq2[p2_cut-1:] in 0-indexed gives us from position p2_cut onwards
             original_p2_fragment = original_aa_embeds[id2][p2_cut-1:]
 
-            # Debug: Check if shapes match
+            # Debug first construct in first chunk
+            if chunk_idx == 0 and construct_idx == 0:
+                print(f"\n  DEBUG first construct:")
+                print(f"    fusion_id: {fusion_id}")
+                print(f"    p1_cut={p1_cut}, p2_cut={p2_cut}, p1_end_pos={p1_end_pos}, p2_start_pos={p2_start_pos}")
+                print(f"    fusion_len={fusion_len}, fusion_aa_embed.shape={fusion_aa_embed.shape}")
+                print(f"    original_aa_embeds[{id1}].shape={original_aa_embeds[id1].shape}")
+                print(f"    original_aa_embeds[{id2}].shape={original_aa_embeds[id2].shape}")
+                print(f"    p1_fusion_fragment.shape={p1_fusion_fragment.shape}, original_p1_fragment.shape={original_p1_fragment.shape}")
+                print(f"    p2_fusion_fragment.shape={p2_fusion_fragment.shape}, original_p2_fragment.shape={original_p2_fragment.shape}")
+
+            # Debug: Check if shapes match - skip if mismatch
             if original_p1_fragment.shape[0] != p1_fusion_fragment.shape[0]:
                 print(f"  Warning: P1 shape mismatch for {fusion_id}: original={original_p1_fragment.shape[0]}, fusion={p1_fusion_fragment.shape[0]}")
                 print(f"    p1_cut={p1_cut}, p1_end_pos={p1_end_pos}")
+                continue
 
             if original_p2_fragment.shape[0] != p2_fusion_fragment.shape[0]:
                 print(f"  Warning: P2 shape mismatch for {fusion_id}: original={original_p2_fragment.shape[0]}, fusion={p2_fusion_fragment.shape[0]}")
                 print(f"    p2_cut={p2_cut}, p2_start_pos={p2_start_pos}, fusion_len={len(fusion_seq)}")
                 print(f"    Expected P2 length: {len(seq2) - (p2_cut - 1)}")
                 print(f"    Actual original P2 embed length: {len(original_aa_embeds[id2])}")
-                # Skip this construct if there's a mismatch
                 continue
 
             # Compare fragments with original contexts (per-residue)
