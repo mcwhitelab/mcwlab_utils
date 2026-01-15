@@ -613,15 +613,15 @@ def save_results(results, output_prefix):
 
         # Sort by average of both fragment similarities
         sorted_fusions = sorted(results['fusion_analyses'],
-                               key=lambda x: (x['p1_fragment_mean_similarity'] +
-                                            x['p2_fragment_mean_similarity']) / 2,
+                               key=lambda x: (x['p1_fragment_similarity'] +
+                                            x['p2_fragment_similarity']) / 2,
                                reverse=True)
 
         for i, fusion in enumerate(sorted_fusions[:10], 1):
             f.write(f"{i}. {fusion['fusion_id']}\n")
             f.write(f"   P1 cut: {fusion['p1_cut']}, P2 cut: {fusion['p2_cut']}\n")
-            f.write(f"   P1 fragment similarity (per-residue): {fusion['p1_fragment_mean_similarity']:.4f}\n")
-            f.write(f"   P2 fragment similarity (per-residue): {fusion['p2_fragment_mean_similarity']:.4f}\n")
+            f.write(f"   P1 fragment similarity (mean-pooled): {fusion['p1_fragment_similarity']:.4f}\n")
+            f.write(f"   P2 fragment similarity (mean-pooled): {fusion['p2_fragment_similarity']:.4f}\n")
             f.write(f"   P1 SWE similarity (distributional): {fusion['p1_swe_cosine_similarity']:.4f}\n")
             f.write(f"   P2 SWE similarity (distributional): {fusion['p2_swe_cosine_similarity']:.4f}\n")
             f.write(f"   Fusion→P1 similarity: {fusion['fusion_to_p1_similarity']:.4f}\n")
@@ -634,14 +634,14 @@ def save_results(results, output_prefix):
         f.write("- original_aa_embeddings: Per-residue embeddings of original proteins\n")
         f.write("- fusion_analyses: List of results for each fusion construct\n")
         f.write("  Each contains:\n")
-        f.write("    - Fragment similarity metrics (mean, std, min, max)\n")
+        f.write("    - Fragment similarity metrics (mean-pooled and SWE)\n")
         f.write("    - Full construct similarities to both parent proteins\n")
-        f.write("    - Per-residue similarity arrays\n\n")
+        f.write("    - SWE embeddings for further analysis\n\n")
 
         f.write("Summary CSV columns:\n")
         f.write("- p1_cut, p2_cut: Junction positions\n")
-        f.write("- p1_fragment_similarity: Mean per-residue cosine similarity of P1 fragment (original vs fusion)\n")
-        f.write("- p2_fragment_similarity: Mean per-residue cosine similarity of P2 fragment (original vs fusion)\n")
+        f.write("- p1_fragment_similarity: Cosine similarity of mean-pooled P1 fragment (original vs fusion)\n")
+        f.write("- p2_fragment_similarity: Cosine similarity of mean-pooled P2 fragment (original vs fusion)\n")
         f.write("- p1_swe_similarity: SWE-based cosine similarity of P1 (captures distributional shape)\n")
         f.write("- p2_swe_similarity: SWE-based cosine similarity of P2 (captures distributional shape)\n")
         f.write("- p1_swe_distance: SWE-based Euclidean distance of P1\n")

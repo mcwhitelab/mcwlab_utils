@@ -342,6 +342,12 @@ def plot_top_constructs_bar(df, output_file, n_top=20, use_swe=False):
     ax.legend(loc='lower left', fontsize=10)
     ax.grid(axis='y', alpha=0.3)
 
+    # Use log scale for y-axis to better visualize differences in high-similarity values
+    # Transform: 1 - similarity to show "distance from perfect"
+    # This makes small differences in 0.99x range more visible
+    ax.set_yscale('log')
+    ax.set_ylabel('Similarity Score (log scale)', fontsize=12, fontweight='bold')
+
     plt.tight_layout()
     plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
     plt.close()
