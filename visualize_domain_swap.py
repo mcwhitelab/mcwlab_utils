@@ -53,7 +53,7 @@ def format_axis_label_with_aa(position, sequence):
     """Format axis label with position and amino acid."""
     if sequence and 1 <= position <= len(sequence):
         aa = sequence[position - 1]  # Convert to 0-indexed
-        return f"{position}\n{aa}"
+        return f"{position}-{aa}"
     return str(position)
 
 
@@ -267,14 +267,14 @@ def plot_dual_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     print(f"Saved: {output_file}")
 
 
-def plot_full_construct_heatmaps(df, output_file):
+def plot_full_construct_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
     """
     Plot side-by-side heatmaps for fusion→P1 and fusion→P2 similarities.
     """
     pivot_fus_p1 = create_pivot_table(df, 'fusion_to_p1_similarity')
     pivot_fus_p2 = create_pivot_table(df, 'fusion_to_p2_similarity')
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    fig, axes = plt.subplots(1, 2, figsize=(20, 9))
 
     # Fusion to P1
     sns.heatmap(pivot_fus_p1, cmap='viridis',
@@ -286,7 +286,7 @@ def plot_full_construct_heatmaps(df, output_file):
     axes[0].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[0].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
     axes[0].invert_yaxis()
-    axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
+    add_aa_labels_to_axis(axes[0], p1_seq, p2_seq)
 
     # Fusion to P2
     sns.heatmap(pivot_fus_p2, cmap='viridis',
@@ -298,7 +298,7 @@ def plot_full_construct_heatmaps(df, output_file):
     axes[1].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[1].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
     axes[1].invert_yaxis()
-    axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=45, ha='right')
+    add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
@@ -306,14 +306,14 @@ def plot_full_construct_heatmaps(df, output_file):
     print(f"Saved: {output_file}")
 
 
-def plot_full_construct_swe_heatmaps(df, output_file):
+def plot_full_construct_swe_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
     """
     Plot side-by-side heatmaps for full fusion SWE→P1 and fusion SWE→P2 similarities.
     """
     pivot_fus_p1 = create_pivot_table(df, 'fusion_swe_to_p1_similarity')
     pivot_fus_p2 = create_pivot_table(df, 'fusion_swe_to_p2_similarity')
 
-    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+    fig, axes = plt.subplots(1, 2, figsize=(20, 9))
 
     # Fusion SWE to P1
     sns.heatmap(pivot_fus_p1, cmap='viridis',
@@ -325,7 +325,7 @@ def plot_full_construct_swe_heatmaps(df, output_file):
     axes[0].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[0].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
     axes[0].invert_yaxis()
-    axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
+    add_aa_labels_to_axis(axes[0], p1_seq, p2_seq)
 
     # Fusion SWE to P2
     sns.heatmap(pivot_fus_p2, cmap='viridis',
@@ -337,7 +337,7 @@ def plot_full_construct_swe_heatmaps(df, output_file):
     axes[1].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
     axes[1].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
     axes[1].invert_yaxis()
-    axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=45, ha='right')
+    add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
     plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
@@ -539,6 +539,23 @@ def plot_line_profiles(df, output_file):
     print(f"Saved: {output_file}")
 
 
+def plot_fusion_length_heatmap(df, output_file, p1_seq=None, p2_seq=None):
+    """
+    Plot heatmap of fusion construct lengths across the P1/P2 cut grid.
+    """
+    pivot = create_pivot_table(df, 'fusion_length')
+
+    plot_heatmap(
+        pivot,
+        title='Fusion Construct Length (residues)',
+        output_file=output_file,
+        cmap='viridis',
+        cbar_label='Length (residues)',
+        p1_seq=p1_seq,
+        p2_seq=p2_seq
+    )
+
+
 def plot_fusion_length_analysis(df, output_file):
     """
     Analyze how fusion construct length relates to similarity metrics.
@@ -692,11 +709,11 @@ def main():
 
     # 3. Full construct similarity heatmaps (mean-pooled cosine)
     print("3. Creating full construct similarity heatmaps (mean-pooled)...")
-    plot_full_construct_heatmaps(df, output_dir / "03_full_construct_similarity_heatmaps.png")
+    plot_full_construct_heatmaps(df, output_dir / "03_full_construct_similarity_heatmaps.png", p1_seq, p2_seq)
 
     # 3b. Full construct SWE similarity heatmaps
     print("3b. Creating full construct SWE similarity heatmaps...")
-    plot_full_construct_swe_heatmaps(df, output_dir / "03b_full_construct_swe_similarity_heatmaps.png")
+    plot_full_construct_swe_heatmaps(df, output_dir / "03b_full_construct_swe_similarity_heatmaps.png", p1_seq, p2_seq)
 
     # 4. Scatter plot - per-residue
     print("4. Creating P1 vs P2 scatter plot (per-residue)...")
@@ -714,32 +731,41 @@ def main():
     print("5b. Creating top constructs bar plot (SWE)...")
     plot_top_constructs_bar(df, output_dir / "05b_top_constructs_bar_swe.png", n_top=20, use_swe=True)
 
-    # 6. Line profiles
-    print("6. Creating line profile plots...")
-    plot_line_profiles(df, output_dir / "06_line_profiles.png")
+    # 6. Fusion length heatmap
+    print("6. Creating fusion length heatmap...")
+    plot_fusion_length_heatmap(df, output_dir / "06_fusion_length_heatmap.png", p1_seq, p2_seq)
 
-    # 7. Fusion length analysis
-    print("7. Creating fusion length analysis...")
-    plot_fusion_length_analysis(df, output_dir / "07_fusion_length_analysis.png")
+    # 7. Line profiles
+    print("7. Creating line profile plots...")
+    plot_line_profiles(df, output_dir / "07_line_profiles.png")
 
-    # 8. Summary statistics
-    print("8. Creating summary statistics...")
-    create_summary_statistics(df, output_dir / "08_summary_statistics.txt")
+    # 8. Fusion length analysis
+    print("8. Creating fusion length analysis...")
+    plot_fusion_length_analysis(df, output_dir / "08_fusion_length_analysis.png")
+
+    # 9. Summary statistics
+    print("9. Creating summary statistics...")
+    create_summary_statistics(df, output_dir / "09_summary_statistics.txt")
 
     print("\n" + "=" * 70)
     print("Visualization complete!")
     print("=" * 70)
     print(f"\nAll outputs saved to: {output_dir}")
     print("\nGenerated files:")
-    print("  01_combined_similarity_heatmap.png - Overall best junction points")
+    print("  01_combined_similarity_heatmap_cosine.png - Overall best junction points (per-residue)")
+    print("  01b_combined_similarity_heatmap_swe.png - Overall best junction points (SWE)")
     print("  02_fragment_similarity_dual_heatmap.png - P1 and P2 per-residue comparisons")
     print("  02b_swe_similarity_dual_heatmap.png - P1 and P2 distributional shape (SWE)")
     print("  03_full_construct_similarity_heatmaps.png - Full fusion to parent similarities")
-    print("  04_p1_vs_p2_scatter.png - Trade-off between P1 and P2 preservation")
-    print("  05_top_constructs_bar.png - Top 20 constructs ranked")
-    print("  06_line_profiles.png - How similarity varies along cut positions")
-    print("  07_fusion_length_analysis.png - Length effects on similarity")
-    print("  08_summary_statistics.txt - Numerical summary and rankings")
+    print("  03b_full_construct_swe_similarity_heatmaps.png - Full fusion SWE similarities")
+    print("  04_p1_vs_p2_scatter_cosine.png - Trade-off between P1 and P2 preservation")
+    print("  04b_p1_vs_p2_scatter_swe.png - Trade-off (SWE)")
+    print("  05_top_constructs_bar_cosine.png - Top 20 constructs ranked (per-residue)")
+    print("  05b_top_constructs_bar_swe.png - Top 20 constructs ranked (SWE)")
+    print("  06_fusion_length_heatmap.png - Fusion construct lengths across cut positions")
+    print("  07_line_profiles.png - How similarity varies along cut positions")
+    print("  08_fusion_length_analysis.png - Length effects on similarity")
+    print("  09_summary_statistics.txt - Numerical summary and rankings")
 
 
 if __name__ == "__main__":
