@@ -306,6 +306,45 @@ def plot_full_construct_heatmaps(df, output_file):
     print(f"Saved: {output_file}")
 
 
+def plot_full_construct_swe_heatmaps(df, output_file):
+    """
+    Plot side-by-side heatmaps for full fusion SWE→P1 and fusion SWE→P2 similarities.
+    """
+    pivot_fus_p1 = create_pivot_table(df, 'fusion_swe_to_p1_similarity')
+    pivot_fus_p2 = create_pivot_table(df, 'fusion_swe_to_p2_similarity')
+
+    fig, axes = plt.subplots(1, 2, figsize=(16, 7))
+
+    # Fusion SWE to P1
+    sns.heatmap(pivot_fus_p1, cmap='viridis',
+                cbar_kws={'label': 'SWE Cosine Similarity'},
+                linewidths=0.5, linecolor='gray',
+                ax=axes[0])
+    axes[0].set_title('Full Fusion SWE Similarity to Original Protein 1\n(Distributional shape)',
+                      fontsize=12, fontweight='bold', pad=15)
+    axes[0].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
+    axes[0].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[0].invert_yaxis()
+    axes[0].set_xticklabels(axes[0].get_xticklabels(), rotation=45, ha='right')
+
+    # Fusion SWE to P2
+    sns.heatmap(pivot_fus_p2, cmap='viridis',
+                cbar_kws={'label': 'SWE Cosine Similarity'},
+                linewidths=0.5, linecolor='gray',
+                ax=axes[1])
+    axes[1].set_title('Full Fusion SWE Similarity to Original Protein 2\n(Distributional shape)',
+                      fontsize=12, fontweight='bold', pad=15)
+    axes[1].set_xlabel('Protein 2 cut position', fontsize=11, fontweight='bold')
+    axes[1].set_ylabel('Protein 1 cut position', fontsize=11, fontweight='bold')
+    axes[1].invert_yaxis()
+    axes[1].set_xticklabels(axes[1].get_xticklabels(), rotation=45, ha='right')
+
+    plt.tight_layout()
+    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
+    plt.close()
+    print(f"Saved: {output_file}")
+
+
 def plot_scatter_p1_vs_p2(df, output_file, use_swe=False):
     """
     Scatter plot of P1 fragment similarity vs P2 fragment similarity.
@@ -651,9 +690,13 @@ def main():
     print("2b. Creating dual SWE similarity heatmaps (distributional)...")
     plot_dual_swe_heatmap(df, output_dir / "02b_swe_similarity_dual_heatmap.png", p1_seq, p2_seq)
 
-    # 3. Full construct similarity heatmaps
-    print("3. Creating full construct similarity heatmaps...")
+    # 3. Full construct similarity heatmaps (mean-pooled cosine)
+    print("3. Creating full construct similarity heatmaps (mean-pooled)...")
     plot_full_construct_heatmaps(df, output_dir / "03_full_construct_similarity_heatmaps.png")
+
+    # 3b. Full construct SWE similarity heatmaps
+    print("3b. Creating full construct SWE similarity heatmaps...")
+    plot_full_construct_swe_heatmaps(df, output_dir / "03b_full_construct_swe_similarity_heatmaps.png")
 
     # 4. Scatter plot - per-residue
     print("4. Creating P1 vs P2 scatter plot (per-residue)...")

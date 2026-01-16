@@ -342,9 +342,9 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
     finally:
         os.unlink(original_fasta)
 
-    # Step 2: Initialize SWE pooler (once, reused for all comparisons)
+    # Step 2: Initialize SWE pooler and compute full-sequence SWE for original proteins
     print("\n" + "="*70)
-    print("Initializing SWE pooler for distributional comparisons...")
+    print("Step 2: Initializing SWE pooler and computing full-sequence SWE")
     print("="*70)
 
     device = torch.device("cuda" if torch.cuda.is_available() and not args.cpu_only else "cpu")
@@ -357,6 +357,17 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
         freeze_swe=True
     ).to(device)
     print(f"SWE pooler initialized on {device}")
+
+    # Compute full-sequence SWE for original proteins
+    original_swe_embeds = {}
+    for seq_id in [id1, id2]:
+        aa_embed_torch = torch.from_numpy(original_aa_embeds[seq_id]).float().unsqueeze(0).to(device)
+        with torch.inference_mode():
+            swe_embed = swe_pooler(aa_embed_torch).cpu().numpy()[0]
+        original_swe_embeds[seq_id] = swe_embed
+        print(f"  Computed full-sequence SWE for {seq_id}: shape {swe_embed.shape}")
+
+    results['original_full_swe_embeddings'] = original_swe_embeds
 
     # Step 3: Process fusion constructs in batches (memory-efficient)
     print("\n" + "="*70)
@@ -513,9 +524,17 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 swe_pooler
             )
 
-            # Compare full fusion to original proteins
+            # Compare full fusion to original proteins (mean-pooled)
             fusion_to_p1_similarity = cosine_similarity(fusion_seq_embed, original_seq_embeds[id1])
             fusion_to_p2_similarity = cosine_similarity(fusion_seq_embed, original_seq_embeds[id2])
+
+            # Compute full-sequence SWE for fusion and compare to original proteins
+            fusion_aa_torch = torch.from_numpy(fusion_aa_embed).float().unsqueeze(0).to(device)
+            with torch.inference_mode():
+                fusion_full_swe = swe_pooler(fusion_aa_torch).cpu().numpy()[0]
+
+            fusion_swe_to_p1_similarity = cosine_similarity(fusion_full_swe, original_swe_embeds[id1])
+            fusion_swe_to_p2_similarity = cosine_similarity(fusion_full_swe, original_swe_embeds[id2])
 
             # Store results
             fusion_result = {
@@ -536,9 +555,13 @@ def analyze_domain_swap_grid(model, tokenizer, config_attrs, seq1, seq2, id1, id
                 'p2_swe_cosine_similarity': p2_swe_similarity['swe_cosine_similarity'],
                 'p2_swe_euclidean_distance': p2_swe_similarity['swe_euclidean_distance'],
 
-                # Full construct similarities
+                # Full construct similarities (mean-pooled)
                 'fusion_to_p1_similarity': fusion_to_p1_similarity,
                 'fusion_to_p2_similarity': fusion_to_p2_similarity,
+
+                # Full construct SWE similarities
+                'fusion_swe_to_p1_similarity': fusion_swe_to_p1_similarity,
+                'fusion_swe_to_p2_similarity': fusion_swe_to_p2_similarity,
 
                 # SWE embeddings (for further analysis)
                 'p1_original_swe': p1_swe_similarity['original_swe'],
@@ -578,9 +601,13 @@ def create_summary_dataframe(results):
             'p1_swe_distance': fusion_result['p1_swe_euclidean_distance'],
             'p2_swe_distance': fusion_result['p2_swe_euclidean_distance'],
 
-            # Full construct similarities
+            # Full construct similarities (mean-pooled)
             'fusion_to_p1_similarity': fusion_result['fusion_to_p1_similarity'],
             'fusion_to_p2_similarity': fusion_result['fusion_to_p2_similarity'],
+
+            # Full construct SWE similarities
+            'fusion_swe_to_p1_similarity': fusion_result['fusion_swe_to_p1_similarity'],
+            'fusion_swe_to_p2_similarity': fusion_result['fusion_swe_to_p2_similarity'],
         })
 
     df = pd.DataFrame(rows)
