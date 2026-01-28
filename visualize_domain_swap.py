@@ -74,6 +74,16 @@ def add_aa_labels_to_axis(ax, p1_seq=None, p2_seq=None):
         ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
 
 
+def save_figure(output_file):
+    """Save figure as both PNG and PDF."""
+    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
+    pdf_file = Path(output_file).with_suffix('.pdf')
+    plt.savefig(pdf_file, bbox_inches='tight')
+    plt.close()
+    print(f"Saved: {output_file}")
+    print(f"Saved: {pdf_file}")
+
+
 def create_pivot_table(df, value_column):
     """
     Create pivot table for heatmap from dataframe.
@@ -110,7 +120,6 @@ def plot_heatmap(data, title, output_file, cmap='viridis', vmin=None, vmax=None,
 
     sns.heatmap(data, cmap=cmap, vmin=vmin, vmax=vmax,
                 cbar_kws={'label': cbar_label},
-                linewidths=0.5, linecolor='gray',
                 square=False, ax=ax)
 
     ax.set_xlabel(xlabel, fontsize=12, fontweight='bold')
@@ -136,9 +145,7 @@ def plot_heatmap(data, title, output_file, cmap='viridis', vmin=None, vmax=None,
         ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {output_file}")
+    save_figure(output_file)
 
 
 def plot_combined_score_heatmap(df, output_file, p1_seq=None, p2_seq=None):
@@ -201,7 +208,6 @@ def plot_dual_swe_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     # P1 SWE similarity
     sns.heatmap(pivot_p1, cmap='RdYlGn',
                 cbar_kws={'label': 'SWE Cosine Similarity'},
-                linewidths=0.5, linecolor='gray',
                 ax=axes[0])
     axes[0].set_title('Protein 1 SWE Similarity\n(Distributional shape: N-term in fusion vs original)',
                       fontsize=12, fontweight='bold', pad=15)
@@ -213,7 +219,6 @@ def plot_dual_swe_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     # P2 SWE similarity
     sns.heatmap(pivot_p2, cmap='RdYlGn',
                 cbar_kws={'label': 'SWE Cosine Similarity'},
-                linewidths=0.5, linecolor='gray',
                 ax=axes[1])
     axes[1].set_title('Protein 2 SWE Similarity\n(Distributional shape: C-term in fusion vs original)',
                       fontsize=12, fontweight='bold', pad=15)
@@ -223,9 +228,7 @@ def plot_dual_swe_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {output_file}")
+    save_figure(output_file)
 
 
 def plot_dual_heatmap(df, output_file, p1_seq=None, p2_seq=None):
@@ -240,7 +243,6 @@ def plot_dual_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     # P1 fragment similarity
     sns.heatmap(pivot_p1, cmap='RdYlGn',
                 cbar_kws={'label': 'Cosine Similarity'},
-                linewidths=0.5, linecolor='gray',
                 ax=axes[0])
     axes[0].set_title('Protein 1 Fragment Similarity\n(N-term in fusion vs original)',
                       fontsize=12, fontweight='bold', pad=15)
@@ -252,7 +254,6 @@ def plot_dual_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     # P2 fragment similarity
     sns.heatmap(pivot_p2, cmap='RdYlGn',
                 cbar_kws={'label': 'Cosine Similarity'},
-                linewidths=0.5, linecolor='gray',
                 ax=axes[1])
     axes[1].set_title('Protein 2 Fragment Similarity\n(C-term in fusion vs original)',
                       fontsize=12, fontweight='bold', pad=15)
@@ -262,9 +263,7 @@ def plot_dual_heatmap(df, output_file, p1_seq=None, p2_seq=None):
     add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {output_file}")
+    save_figure(output_file)
 
 
 def plot_full_construct_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
@@ -279,7 +278,6 @@ def plot_full_construct_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
     # Fusion to P1
     sns.heatmap(pivot_fus_p1, cmap='viridis',
                 cbar_kws={'label': 'Cosine Similarity'},
-                linewidths=0.5, linecolor='gray',
                 ax=axes[0])
     axes[0].set_title('Full Fusion Similarity to Original Protein 1',
                       fontsize=12, fontweight='bold', pad=15)
@@ -291,7 +289,6 @@ def plot_full_construct_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
     # Fusion to P2
     sns.heatmap(pivot_fus_p2, cmap='viridis',
                 cbar_kws={'label': 'Cosine Similarity'},
-                linewidths=0.5, linecolor='gray',
                 ax=axes[1])
     axes[1].set_title('Full Fusion Similarity to Original Protein 2',
                       fontsize=12, fontweight='bold', pad=15)
@@ -301,9 +298,7 @@ def plot_full_construct_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
     add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {output_file}")
+    save_figure(output_file)
 
 
 def plot_full_construct_swe_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
@@ -318,7 +313,6 @@ def plot_full_construct_swe_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
     # Fusion SWE to P1
     sns.heatmap(pivot_fus_p1, cmap='viridis',
                 cbar_kws={'label': 'SWE Cosine Similarity'},
-                linewidths=0.5, linecolor='gray',
                 ax=axes[0])
     axes[0].set_title('Full Fusion SWE Similarity to Original Protein 1\n(Distributional shape)',
                       fontsize=12, fontweight='bold', pad=15)
@@ -330,7 +324,6 @@ def plot_full_construct_swe_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
     # Fusion SWE to P2
     sns.heatmap(pivot_fus_p2, cmap='viridis',
                 cbar_kws={'label': 'SWE Cosine Similarity'},
-                linewidths=0.5, linecolor='gray',
                 ax=axes[1])
     axes[1].set_title('Full Fusion SWE Similarity to Original Protein 2\n(Distributional shape)',
                       fontsize=12, fontweight='bold', pad=15)
@@ -340,9 +333,7 @@ def plot_full_construct_swe_heatmaps(df, output_file, p1_seq=None, p2_seq=None):
     add_aa_labels_to_axis(axes[1], p1_seq, p2_seq)
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {output_file}")
+    save_figure(output_file)
 
 
 def plot_scatter_p1_vs_p2(df, output_file, use_swe=False):
@@ -393,9 +384,7 @@ def plot_scatter_p1_vs_p2(df, output_file, use_swe=False):
     ax.legend(loc='lower right')
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {output_file}")
+    save_figure(output_file)
 
 
 def plot_top_constructs_bar(df, output_file, n_top=20, use_swe=False):
@@ -459,9 +448,7 @@ def plot_top_constructs_bar(df, output_file, n_top=20, use_swe=False):
     ax.invert_yaxis()
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {output_file}")
+    save_figure(output_file)
 
 
 def plot_line_profiles(df, output_file):
@@ -534,9 +521,7 @@ def plot_line_profiles(df, output_file):
     axes[1, 1].set_ylim(0, 1)
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {output_file}")
+    save_figure(output_file)
 
 
 def plot_fusion_length_heatmap(df, output_file, p1_seq=None, p2_seq=None):
@@ -596,9 +581,7 @@ def plot_fusion_length_analysis(df, output_file):
     axes[1, 1].grid(axis='y', alpha=0.3)
 
     plt.tight_layout()
-    plt.savefig(output_file, dpi=plt.rcParams['figure.dpi'], bbox_inches='tight')
-    plt.close()
-    print(f"Saved: {output_file}")
+    save_figure(output_file)
 
 
 def create_summary_statistics(df, output_file):
