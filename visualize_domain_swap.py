@@ -647,14 +647,24 @@ def main():
     # Set DPI
     plt.rcParams['figure.dpi'] = args.dpi
 
-    # Create output directory
-    output_dir = Path(args.output_dir)
+    # Extract basename from input CSV (e.g., "fusion_p1_529-545_p2_133-157.summary.csv" -> "fusion_p1_529-545_p2_133-157")
+    input_path = Path(args.input_csv)
+    # Remove .summary.csv or just .csv suffix to get base name
+    basename = input_path.name
+    if basename.endswith('.summary.csv'):
+        basename = basename[:-12]  # Remove ".summary.csv"
+    elif basename.endswith('.csv'):
+        basename = basename[:-4]  # Remove ".csv"
+
+    # Create output directory: {output_dir}/images/{basename}/
+    output_dir = Path(args.output_dir) / "images" / basename
     output_dir.mkdir(parents=True, exist_ok=True)
 
     print("=" * 70)
     print("Domain Swap Embedding Analysis - Visualization")
     print("=" * 70)
     print(f"\nInput CSV: {args.input_csv}")
+    print(f"Basename: {basename}")
     print(f"Output directory: {output_dir}")
     print(f"DPI: {args.dpi}\n")
 
@@ -676,78 +686,78 @@ def main():
 
     # 1. Combined fragment similarity heatmap (per-residue cosine)
     print("1. Creating combined fragment similarity heatmap (per-residue)...")
-    plot_combined_score_heatmap(df, output_dir / "01_combined_similarity_heatmap_cosine.png", p1_seq, p2_seq)
+    plot_combined_score_heatmap(df, output_dir / f"{basename}_01_combined_similarity_heatmap_cosine.png", p1_seq, p2_seq)
 
     # 1b. Combined SWE similarity heatmap (distributional shape)
     print("1b. Creating combined SWE similarity heatmap (distributional)...")
-    plot_combined_swe_score_heatmap(df, output_dir / "01b_combined_similarity_heatmap_swe.png", p1_seq, p2_seq)
+    plot_combined_swe_score_heatmap(df, output_dir / f"{basename}_01b_combined_similarity_heatmap_swe.png", p1_seq, p2_seq)
 
     # 2. Dual heatmaps (P1 and P2 side by side) - per-residue
     print("2. Creating dual fragment similarity heatmaps (per-residue)...")
-    plot_dual_heatmap(df, output_dir / "02_fragment_similarity_dual_heatmap.png", p1_seq, p2_seq)
+    plot_dual_heatmap(df, output_dir / f"{basename}_02_fragment_similarity_dual_heatmap.png", p1_seq, p2_seq)
 
     # 2b. Dual heatmaps for SWE similarities
     print("2b. Creating dual SWE similarity heatmaps (distributional)...")
-    plot_dual_swe_heatmap(df, output_dir / "02b_swe_similarity_dual_heatmap.png", p1_seq, p2_seq)
+    plot_dual_swe_heatmap(df, output_dir / f"{basename}_02b_swe_similarity_dual_heatmap.png", p1_seq, p2_seq)
 
     # 3. Full construct similarity heatmaps (mean-pooled cosine)
     print("3. Creating full construct similarity heatmaps (mean-pooled)...")
-    plot_full_construct_heatmaps(df, output_dir / "03_full_construct_similarity_heatmaps.png", p1_seq, p2_seq)
+    plot_full_construct_heatmaps(df, output_dir / f"{basename}_03_full_construct_similarity_heatmaps.png", p1_seq, p2_seq)
 
     # 3b. Full construct SWE similarity heatmaps
     print("3b. Creating full construct SWE similarity heatmaps...")
-    plot_full_construct_swe_heatmaps(df, output_dir / "03b_full_construct_swe_similarity_heatmaps.png", p1_seq, p2_seq)
+    plot_full_construct_swe_heatmaps(df, output_dir / f"{basename}_03b_full_construct_swe_similarity_heatmaps.png", p1_seq, p2_seq)
 
     # 4. Scatter plot - per-residue
     print("4. Creating P1 vs P2 scatter plot (per-residue)...")
-    plot_scatter_p1_vs_p2(df, output_dir / "04_p1_vs_p2_scatter_cosine.png", use_swe=False)
+    plot_scatter_p1_vs_p2(df, output_dir / f"{basename}_04_p1_vs_p2_scatter_cosine.png", use_swe=False)
 
     # 4b. Scatter plot - SWE
     print("4b. Creating P1 vs P2 scatter plot (SWE)...")
-    plot_scatter_p1_vs_p2(df, output_dir / "04b_p1_vs_p2_scatter_swe.png", use_swe=True)
+    plot_scatter_p1_vs_p2(df, output_dir / f"{basename}_04b_p1_vs_p2_scatter_swe.png", use_swe=True)
 
     # 5. Top constructs bar plot - per-residue
     print("5. Creating top constructs bar plot (per-residue)...")
-    plot_top_constructs_bar(df, output_dir / "05_top_constructs_bar_cosine.png", n_top=20, use_swe=False)
+    plot_top_constructs_bar(df, output_dir / f"{basename}_05_top_constructs_bar_cosine.png", n_top=20, use_swe=False)
 
     # 5b. Top constructs bar plot - SWE
     print("5b. Creating top constructs bar plot (SWE)...")
-    plot_top_constructs_bar(df, output_dir / "05b_top_constructs_bar_swe.png", n_top=20, use_swe=True)
+    plot_top_constructs_bar(df, output_dir / f"{basename}_05b_top_constructs_bar_swe.png", n_top=20, use_swe=True)
 
     # 6. Fusion length heatmap
     print("6. Creating fusion length heatmap...")
-    plot_fusion_length_heatmap(df, output_dir / "06_fusion_length_heatmap.png", p1_seq, p2_seq)
+    plot_fusion_length_heatmap(df, output_dir / f"{basename}_06_fusion_length_heatmap.png", p1_seq, p2_seq)
 
     # 7. Line profiles
     print("7. Creating line profile plots...")
-    plot_line_profiles(df, output_dir / "07_line_profiles.png")
+    plot_line_profiles(df, output_dir / f"{basename}_07_line_profiles.png")
 
     # 8. Fusion length analysis
     print("8. Creating fusion length analysis...")
-    plot_fusion_length_analysis(df, output_dir / "08_fusion_length_analysis.png")
+    plot_fusion_length_analysis(df, output_dir / f"{basename}_08_fusion_length_analysis.png")
 
     # 9. Summary statistics
     print("9. Creating summary statistics...")
-    create_summary_statistics(df, output_dir / "09_summary_statistics.txt")
+    create_summary_statistics(df, output_dir / f"{basename}_09_summary_statistics.txt")
 
     print("\n" + "=" * 70)
     print("Visualization complete!")
     print("=" * 70)
     print(f"\nAll outputs saved to: {output_dir}")
-    print("\nGenerated files:")
-    print("  01_combined_similarity_heatmap_cosine.png - Overall best junction points (per-residue)")
-    print("  01b_combined_similarity_heatmap_swe.png - Overall best junction points (SWE)")
-    print("  02_fragment_similarity_dual_heatmap.png - P1 and P2 per-residue comparisons")
-    print("  02b_swe_similarity_dual_heatmap.png - P1 and P2 distributional shape (SWE)")
-    print("  03_full_construct_similarity_heatmaps.png - Full fusion to parent similarities")
-    print("  03b_full_construct_swe_similarity_heatmaps.png - Full fusion SWE similarities")
-    print("  04_p1_vs_p2_scatter_cosine.png - Trade-off between P1 and P2 preservation")
-    print("  04b_p1_vs_p2_scatter_swe.png - Trade-off (SWE)")
-    print("  05_top_constructs_bar_cosine.png - Top 20 constructs ranked (per-residue)")
-    print("  05b_top_constructs_bar_swe.png - Top 20 constructs ranked (SWE)")
-    print("  06_fusion_length_heatmap.png - Fusion construct lengths across cut positions")
-    print("  07_line_profiles.png - How similarity varies along cut positions")
-    print("  08_fusion_length_analysis.png - Length effects on similarity")
+    print(f"\nGenerated files (with prefix '{basename}_'):")
+    print("  01_combined_similarity_heatmap_cosine.png/pdf - Overall best junction points (per-residue)")
+    print("  01b_combined_similarity_heatmap_swe.png/pdf - Overall best junction points (SWE)")
+    print("  02_fragment_similarity_dual_heatmap.png/pdf - P1 and P2 per-residue comparisons")
+    print("  02b_swe_similarity_dual_heatmap.png/pdf - P1 and P2 distributional shape (SWE)")
+    print("  03_full_construct_similarity_heatmaps.png/pdf - Full fusion to parent similarities")
+    print("  03b_full_construct_swe_similarity_heatmaps.png/pdf - Full fusion SWE similarities")
+    print("  04_p1_vs_p2_scatter_cosine.png/pdf - Trade-off between P1 and P2 preservation")
+    print("  04b_p1_vs_p2_scatter_swe.png/pdf - Trade-off (SWE)")
+    print("  05_top_constructs_bar_cosine.png/pdf - Top 20 constructs ranked (per-residue)")
+    print("  05b_top_constructs_bar_swe.png/pdf - Top 20 constructs ranked (SWE)")
+    print("  06_fusion_length_heatmap.png/pdf - Fusion construct lengths across cut positions")
+    print("  07_line_profiles.png/pdf - How similarity varies along cut positions")
+    print("  08_fusion_length_analysis.png/pdf - Length effects on similarity")
     print("  09_summary_statistics.txt - Numerical summary and rankings")
 
 

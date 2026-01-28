@@ -615,10 +615,19 @@ def create_summary_dataframe(results):
 
 
 def save_results(results, output_prefix):
-    """Save results to pickle and description files."""
-    pkl_file = f"{output_prefix}.pkl"
-    desc_file = f"{output_prefix}.description.txt"
-    csv_file = f"{output_prefix}.summary.csv"
+    """Save results to pickle and description files.
+
+    Filenames include the scan ranges for clarity:
+    {output_prefix}_p1_{start}-{end}_p2_{start}-{end}.{ext}
+    """
+    # Build range suffix from results
+    p1_start, p1_end = results['nterm_scan_range']
+    p2_start, p2_end = results['cterm_scan_range']
+    range_suffix = f"_p1_{p1_start}-{p1_end}_p2_{p2_start}-{p2_end}"
+
+    pkl_file = f"{output_prefix}{range_suffix}.pkl"
+    desc_file = f"{output_prefix}{range_suffix}.description.txt"
+    csv_file = f"{output_prefix}{range_suffix}.summary.csv"
 
     # Save pickle
     with open(pkl_file, 'wb') as f:
