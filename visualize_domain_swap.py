@@ -482,7 +482,6 @@ def plot_line_profiles(df, output_file):
     axes[0, 0].set_title('P1 Fragment Similarity vs P1 Cut Position', fontsize=12, fontweight='bold')
     axes[0, 0].legend(title='P2 cut', fontsize=9)
     axes[0, 0].grid(True, alpha=0.3)
-    axes[0, 0].set_ylim(0, 1)
 
     # Panel 2: P2 fragment similarity vs P1 cut (for selected P2 cuts)
     for p2 in p2_selected:
@@ -494,7 +493,6 @@ def plot_line_profiles(df, output_file):
     axes[0, 1].set_title('P2 Fragment Similarity vs P1 Cut Position', fontsize=12, fontweight='bold')
     axes[0, 1].legend(title='P2 cut', fontsize=9)
     axes[0, 1].grid(True, alpha=0.3)
-    axes[0, 1].set_ylim(0, 1)
 
     # Panel 3: P1 fragment similarity vs P2 cut (for selected P1 cuts)
     for p1 in p1_selected:
@@ -506,7 +504,6 @@ def plot_line_profiles(df, output_file):
     axes[1, 0].set_title('P1 Fragment Similarity vs P2 Cut Position', fontsize=12, fontweight='bold')
     axes[1, 0].legend(title='P1 cut', fontsize=9)
     axes[1, 0].grid(True, alpha=0.3)
-    axes[1, 0].set_ylim(0, 1)
 
     # Panel 4: P2 fragment similarity vs P2 cut (for selected P1 cuts)
     for p1 in p1_selected:
@@ -518,7 +515,6 @@ def plot_line_profiles(df, output_file):
     axes[1, 1].set_title('P2 Fragment Similarity vs P2 Cut Position', fontsize=12, fontweight='bold')
     axes[1, 1].legend(title='P1 cut', fontsize=9)
     axes[1, 1].grid(True, alpha=0.3)
-    axes[1, 1].set_ylim(0, 1)
 
     plt.tight_layout()
     save_figure(output_file)
