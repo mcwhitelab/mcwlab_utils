@@ -614,8 +614,8 @@ def create_summary_dataframe(results):
     return df
 
 
-def save_results(results, output_prefix):
-    """Save results to pickle and description files.
+def save_results(results, output_prefix, fusion_constructs=None):
+    """Save results to pickle, description, and FASTA files.
 
     Filenames include the scan ranges for clarity:
     {output_prefix}_p1_{start}-{end}_p2_{start}-{end}.{ext}
@@ -628,6 +628,7 @@ def save_results(results, output_prefix):
     pkl_file = f"{output_prefix}{range_suffix}.pkl"
     desc_file = f"{output_prefix}{range_suffix}.description.txt"
     csv_file = f"{output_prefix}{range_suffix}.summary.csv"
+    fasta_file = f"{output_prefix}{range_suffix}.fasta"
 
     # Save pickle
     with open(pkl_file, 'wb') as f:
@@ -638,6 +639,15 @@ def save_results(results, output_prefix):
     df = create_summary_dataframe(results)
     df.to_csv(csv_file, index=False)
     print(f"Summary CSV saved to: {csv_file}")
+
+    # Save fusion sequences as FASTA
+    if fusion_constructs:
+        records = []
+        for fusion_id, fusion_seq, p1_cut, p2_cut, p1_end_pos, p2_start_pos in fusion_constructs:
+            desc = f"p1_cut={p1_cut} p2_cut={p2_cut} len={len(fusion_seq)}"
+            records.append(SeqRecord(Seq(fusion_seq), id=f"p1cut{p1_cut}_p2cut{p2_cut}", description=desc))
+        SeqIO.write(records, fasta_file, "fasta")
+        print(f"Fusion sequences FASTA saved to: {fasta_file}")
 
     # Save description
     with open(desc_file, 'w') as f:
@@ -773,7 +783,7 @@ def main():
     print("\n" + "="*70)
     print("Saving results...")
     print("="*70)
-    save_results(results, args.output_prefix)
+    save_results(results, args.output_prefix, fusion_constructs)
 
     print("\n" + "="*70)
     print("Analysis complete!")
