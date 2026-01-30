@@ -21,7 +21,7 @@ def _get_pdb_name(record, pad_width):
     return record.id
 
 
-def _fold_one(record, output_dir, pad_width):
+def _fold_one(record, output_dir, pad_width, truncate=None):
     """Fold a single sequence and write its PDB file. Returns (name, status)."""
     pdb_name = _get_pdb_name(record, pad_width)
     pdb_path = output_dir / f"{pdb_name}.pdb"
@@ -30,6 +30,9 @@ def _fold_one(record, output_dir, pad_width):
         return pdb_name, "skipped"
 
     sequence = str(record.seq).replace(" ", "")
+    if truncate and len(sequence) > truncate:
+        print(f"Truncating {pdb_name} from {len(sequence)} to {truncate} residues")
+        sequence = sequence[:truncate]
 
     try:
         response = requests.post(
@@ -44,11 +47,15 @@ def _fold_one(record, output_dir, pad_width):
 
         return pdb_name, "ok"
 
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 413:
+            return pdb_name, f"skipped: sequence too long ({len(sequence)} residues)"
+        return pdb_name, f"error: {e}"
     except requests.RequestException as e:
         return pdb_name, f"error: {e}"
 
 
-def fold_sequences_with_esmfold(fasta_path, max_workers=4):
+def fold_sequences_with_esmfold(fasta_path, max_workers=4, truncate=None):
     """
     Fold all sequences in a FASTA file using ESMFold API.
     Creates a directory named after the FASTA file to store PDB outputs.
@@ -72,7 +79,7 @@ def fold_sequences_with_esmfold(fasta_path, max_workers=4):
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(_fold_one, rec, output_dir, pad_width): rec
+            pool.submit(_fold_one, rec, output_dir, pad_width, truncate): rec
             for rec in records
         }
         for future in as_completed(futures):
@@ -90,7 +97,9 @@ if __name__ == "__main__":
                         help='Path to input FASTA file')
     parser.add_argument('--workers', type=int, default=4,
                         help='Number of parallel requests (default: 4)')
+    parser.add_argument('--truncate', type=int, default=None,
+                        help='Truncate sequences longer than this many residues')
 
     args = parser.parse_args()
 
-    fold_sequences_with_esmfold(args.fasta_file, max_workers=args.workers)
+    fold_sequences_with_esmfold(args.fasta_file, max_workers=args.workers, truncate=args.truncate)
