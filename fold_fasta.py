@@ -1,94 +1,96 @@
 import os
-import subprocess
 import time
 from pathlib import Path
 from Bio import SeqIO
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import re
+import argparse
 
-def fold_sequences_with_esmfold(fasta_path):
+import requests
+
+API_URL = "https://api.esmatlas.com/foldSequence/v1/pdb/"
+
+
+def _get_pdb_name(record, pad_width):
+    """Get the zero-padded PDB name for a record."""
+    step_match = re.search(r'step(\d+)', record.id)
+    if step_match:
+        step_num = step_match.group(1)
+        padded_step = str(int(step_num)).zfill(pad_width)
+        return record.id.replace(f"step{step_num}", f"step{padded_step}")
+    return record.id
+
+
+def _fold_one(record, output_dir, pad_width):
+    """Fold a single sequence and write its PDB file. Returns (name, status)."""
+    pdb_name = _get_pdb_name(record, pad_width)
+    pdb_path = output_dir / f"{pdb_name}.pdb"
+
+    if pdb_path.exists():
+        return pdb_name, "skipped"
+
+    sequence = str(record.seq).replace(" ", "")
+
+    try:
+        response = requests.post(
+            API_URL,
+            data=sequence,
+            headers={"Content-Type": "text/plain"},
+        )
+        response.raise_for_status()
+
+        with open(pdb_path, 'w') as f:
+            f.write(response.text)
+
+        return pdb_name, "ok"
+
+    except requests.RequestException as e:
+        return pdb_name, f"error: {e}"
+
+
+def fold_sequences_with_esmfold(fasta_path, max_workers=4):
     """
     Fold all sequences in a FASTA file using ESMFold API.
     Creates a directory named after the FASTA file to store PDB outputs.
     """
-    # Create output directory next to the fasta file
     fasta_path = Path(fasta_path)
     fasta_name = fasta_path.stem
     output_dir = fasta_path.parent / f"esmfold_pdbs_{fasta_name}"
     output_dir.mkdir(exist_ok=True)
-    
+
     # First pass to determine max step number for padding
     max_step = 0
     for record in SeqIO.parse(fasta_path, "fasta"):
         step_match = re.search(r'step(\d+)', record.id)
         if step_match:
             max_step = max(max_step, int(step_match.group(1)))
-    
-    # Calculate padding width based on max step
     pad_width = len(str(max_step))
-    
-    # Read sequences from FASTA
-    for record in SeqIO.parse(fasta_path, "fasta"):
-        # Extract and pad step number
-        step_match = re.search(r'step(\d+)', record.id)
-        if step_match:
-            step_num = step_match.group(1)
-            padded_step = str(int(step_num)).zfill(pad_width)
-            # Replace the original step number with padded version
-            pdb_name = record.id.replace(f"step{step_num}", f"step{padded_step}")
-        else:
-            pdb_name = record.id
-            
-        pdb_path = output_dir / f"{pdb_name}.pdb"
-        
-        # Skip if PDB already exists
-        if pdb_path.exists():
-            print(f"Skipping {pdb_name} - already exists")
-            continue
-        
-        # Prepare sequence (remove any whitespace)
-        sequence = str(record.seq).replace(" ", "")
-        
-        # Construct and execute curl command
-        cmd = [
-            "curl",
-            "-X", "POST",
-            "--data", sequence,
-            "https://api.esmatlas.com/foldSequence/v1/pdb/"
-        ]
-        
-        print(f"Folding sequence for {pdb_name}...")
-        try:
-            # Run curl command and capture output
-            result = subprocess.run(cmd, 
-                                 capture_output=True, 
-                                 text=True, 
-                                 check=True)
-            
-            # Save PDB file
-            with open(pdb_path, 'w') as f:
-                f.write(result.stdout)
-            
-            print(f"Successfully saved {pdb_name}.pdb")
-            
-            # Sleep to avoid overwhelming the API
-            time.sleep(2)
-            
-        except subprocess.CalledProcessError as e:
-            print(f"Error folding {pdb_name}: {e}")
-            print(f"Error output: {e.stderr}")
-            continue
-        except Exception as e:
-            print(f"Unexpected error for {pdb_name}: {e}")
-            continue
+
+    # Collect records so we can fan them out
+    records = list(SeqIO.parse(fasta_path, "fasta"))
+    print(f"Folding {len(records)} sequences with {max_workers} workers...")
+
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_fold_one, rec, output_dir, pad_width): rec
+            for rec in records
+        }
+        for future in as_completed(futures):
+            name, status = future.result()
+            if status == "skipped":
+                print(f"Skipping {name} - already exists")
+            elif status == "ok":
+                print(f"Successfully saved {name}.pdb")
+            else:
+                print(f"Error folding {name}: {status}")
 
 if __name__ == "__main__":
-    import argparse
-    
     parser = argparse.ArgumentParser(description='Fold sequences using ESMFold API')
-    parser.add_argument('fasta_file', 
-                       type=str,
-                       help='Path to input FASTA file')
-    
+    parser.add_argument('fasta_file', type=str,
+                        help='Path to input FASTA file')
+    parser.add_argument('--workers', type=int, default=4,
+                        help='Number of parallel requests (default: 4)')
+
     args = parser.parse_args()
-    
-    fold_sequences_with_esmfold(args.fasta_file)
+
+    fold_sequences_with_esmfold(args.fasta_file, max_workers=args.workers)
