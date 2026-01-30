@@ -48,8 +48,6 @@ def _fold_one(record, output_dir, pad_width, truncate=None):
         return pdb_name, "ok"
 
     except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 413:
-            return pdb_name, f"skipped: sequence too long ({len(sequence)} residues)"
         return pdb_name, f"error: {e}"
     except requests.RequestException as e:
         return pdb_name, f"error: {e}"
