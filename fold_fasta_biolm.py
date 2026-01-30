@@ -62,6 +62,12 @@ def _fold_batch(records, output_dir, pad_width, api_key, truncate=None):
             for n, s in names
         ]
 
+    # Normalize response: could be list of dicts or list of strings
+    if isinstance(results, dict):
+        results = results.get("results", results.get("items", [results]))
+    if not isinstance(results, list):
+        results = [results]
+
     # Match results back to the non-skipped entries
     result_iter = iter(results)
     final = []
@@ -70,15 +76,26 @@ def _fold_batch(records, output_dir, pad_width, api_key, truncate=None):
             final.append((pdb_name, "skipped"))
             continue
 
-        entry = next(result_iter)
-        pdb_text = entry.get("pdb")
+        entry = next(result_iter, None)
+        if entry is None:
+            final.append((pdb_name, "error: no result returned for this sequence"))
+            continue
+
+        # Handle both dict (with "pdb" key) and raw string responses
+        if isinstance(entry, dict):
+            pdb_text = entry.get("pdb") or entry.get("result") or entry.get("structure")
+        elif isinstance(entry, str):
+            pdb_text = entry if entry.startswith(("PARENT", "ATOM", "HEADER")) else None
+        else:
+            pdb_text = None
+
         if pdb_text:
             pdb_path = output_dir / f"{pdb_name}.pdb"
             with open(pdb_path, 'w') as f:
                 f.write(pdb_text)
             final.append((pdb_name, "ok"))
         else:
-            final.append((pdb_name, f"error: no PDB in response: {entry}"))
+            final.append((pdb_name, f"error: unexpected response format: {str(entry)[:200]}"))
 
     return final
 
