@@ -21,7 +21,7 @@ def _get_pdb_name(record, pad_width):
     return record.id
 
 
-def _fold_batch(records, output_dir, pad_width, api_key, truncate=None):
+def _fold_batch(records, output_dir, pad_width, api_key, truncate=None, homodimer=False):
     """Fold a batch of sequences via BioLM Boltz2 API. Returns list of (name, status)."""
     names = []
     items = []
@@ -39,15 +39,20 @@ def _fold_batch(records, output_dir, pad_width, api_key, truncate=None):
             sequence = sequence[:truncate]
 
         names.append((pdb_name, None))
-        items.append({
-            "molecules": [
-                {
-                    "id": "A",
-                    "type": "protein",
-                    "sequence": sequence,
-                }
-            ]
-        })
+        molecules = [
+            {
+                "id": "A",
+                "type": "protein",
+                "sequence": sequence,
+            }
+        ]
+        if homodimer:
+            molecules.append({
+                "id": "B",
+                "type": "protein",
+                "sequence": sequence,
+            })
+        items.append({"molecules": molecules})
 
     # Nothing to submit (all skipped)
     if not items:
@@ -108,7 +113,7 @@ def _fold_batch(records, output_dir, pad_width, api_key, truncate=None):
     return final
 
 
-def fold_sequences_with_boltz2(fasta_path, api_key, max_workers=4, batch_size=2, truncate=None):
+def fold_sequences_with_boltz2(fasta_path, api_key, max_workers=4, batch_size=2, truncate=None, homodimer=False):
     """
     Fold all sequences in a FASTA file using BioLM Boltz2 API.
     Creates a directory named after the FASTA file to store PDB outputs.
@@ -134,7 +139,7 @@ def fold_sequences_with_boltz2(fasta_path, api_key, max_workers=4, batch_size=2,
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(_fold_batch, batch, output_dir, pad_width, api_key, truncate): batch
+            pool.submit(_fold_batch, batch, output_dir, pad_width, api_key, truncate, homodimer): batch
             for batch in batches
         }
         for future in as_completed(futures):
@@ -159,6 +164,8 @@ if __name__ == "__main__":
                         help='Number of sequences per API call (default: 2)')
     parser.add_argument('--truncate', type=int, default=None,
                         help='Truncate sequences longer than this many residues')
+    parser.add_argument('--homodimer', action='store_true',
+                        help='Add a second copy of each protein as molecule B')
 
     args = parser.parse_args()
 
@@ -168,4 +175,5 @@ if __name__ == "__main__":
         max_workers=args.workers,
         batch_size=args.batch_size,
         truncate=args.truncate,
+        homodimer=args.homodimer,
     )
