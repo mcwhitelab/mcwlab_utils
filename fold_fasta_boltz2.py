@@ -120,7 +120,8 @@ def fold_sequences_with_boltz2(fasta_path, api_key, max_workers=4, batch_size=2,
     """
     fasta_path = Path(fasta_path)
     fasta_name = fasta_path.stem
-    output_dir = fasta_path.parent / f"boltz2_pdbs_{fasta_name}"
+    suffix = "_dimer" if homodimer else ""
+    output_dir = fasta_path.parent / f"boltz2_pdbs_{fasta_name}{suffix}"
     output_dir.mkdir(exist_ok=True)
 
     # First pass to determine max step number for padding
