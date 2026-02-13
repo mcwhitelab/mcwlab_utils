@@ -2,7 +2,7 @@
 """
 Convert FASTA sequences to AlphaFold Server JSON job format.
 
-Samples n sequences from a FASTA file and outputs JSON files for AlphaFold Server.
+Samples n sequences from a FASTA file and outputs a single JSON file with multiple jobs for AlphaFold Server.
 """
 
 import argparse
@@ -20,8 +20,8 @@ def get_args():
                         help="Input FASTA file")
     parser.add_argument("-n", "--num_samples", dest="n", type=int, required=True,
                         help="Number of sequences to sample")
-    parser.add_argument("-o", "--output", dest="output_dir", type=str, required=True,
-                        help="Output directory for JSON files")
+    parser.add_argument("-o", "--output", dest="output_file", type=str, required=True,
+                        help="Output JSON file path")
     parser.add_argument("-c", "--count", dest="count", type=int, default=1,
                         help="Number of copies of each protein chain (default: 1)")
     parser.add_argument("--seed", dest="seed", type=int, default=None,
@@ -68,9 +68,9 @@ def main():
     if args.seed is not None:
         random.seed(args.seed)
 
-    # Create output directory
-    output_dir = Path(args.output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Create output directory if needed
+    output_file = Path(args.output_file)
+    output_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Read all sequences from FASTA
     records = list(SeqIO.parse(args.input_fasta, "fasta"))
@@ -93,24 +93,22 @@ def main():
             selected = random.sample(records, args.n)
         print(f"Sampled {len(selected)} sequences")
 
-    # Convert and save each sequence
+    # Convert all selected sequences to jobs
+    all_jobs = []
     for i, record in enumerate(selected, 1):
         name = record.id
         sequence = str(record.seq)
 
-        # Create JSON
+        # Create job
         job = fasta_to_alphafold_json(name, sequence, args.count)
+        all_jobs.append(job)
+        print(f"  [{i}/{len(selected)}] Added: {name}")
 
-        # Save to file (sanitize filename)
-        safe_name = "".join(c if c.isalnum() or c in "_-" else "_" for c in name)
-        output_file = output_dir / f"{safe_name}.json"
+    # Save all jobs to a single JSON file
+    with open(output_file, 'w') as f:
+        json.dump(all_jobs, f, indent=2)
 
-        with open(output_file, 'w') as f:
-            json.dump(job, f, indent=2)
-
-        print(f"  [{i}/{len(selected)}] Saved: {output_file}")
-
-    print(f"\nDone! {len(selected)} JSON files saved to {output_dir}")
+    print(f"\nDone! {len(selected)} jobs saved to {output_file}")
 
 
 if __name__ == "__main__":
