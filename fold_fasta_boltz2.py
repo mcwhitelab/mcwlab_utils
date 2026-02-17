@@ -1,4 +1,5 @@
 import os
+import csv
 import time
 from pathlib import Path
 from Bio import SeqIO
@@ -11,6 +12,16 @@ import requests
 API_URL = "https://biolm.ai/api/v3/boltz2/predict/"
 
 
+def _load_ligands(ligand_path):
+    """Load ligands from a CSV file with columns: id, smiles."""
+    ligands = []
+    with open(ligand_path) as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            ligands.append({"id": row["id"], "smiles": row["smiles"]})
+    return ligands
+
+
 def _get_pdb_name(record, pad_width):
     """Get the zero-padded PDB name for a record."""
     step_match = re.search(r'step(\d+)', record.id)
@@ -21,38 +32,54 @@ def _get_pdb_name(record, pad_width):
     return record.id
 
 
-def _fold_batch(records, output_dir, pad_width, api_key, truncate=None, homodimer=False):
+def _fold_batch(records, output_dir, pad_width, api_key, truncate=None, homodimer=False, ligands=None):
     """Fold a batch of sequences via BioLM Boltz2 API. Returns list of (name, status)."""
     names = []
     items = []
     for rec in records:
         pdb_name = _get_pdb_name(rec, pad_width)
-        cif_path = output_dir / f"{pdb_name}.cif"
-
-        if cif_path.exists():
-            names.append((pdb_name, "skipped"))
-            continue
 
         sequence = str(rec.seq).replace(" ", "")
         if truncate and len(sequence) > truncate:
             print(f"Truncating {pdb_name} from {len(sequence)} to {truncate} residues")
             sequence = sequence[:truncate]
 
-        names.append((pdb_name, None))
-        molecules = [
-            {
-                "id": "A",
-                "type": "protein",
-                "sequence": sequence,
-            }
-        ]
-        if homodimer:
-            molecules.append({
-                "id": "B",
-                "type": "protein",
-                "sequence": sequence,
-            })
-        items.append({"molecules": molecules})
+        # Build jobs: one per ligand (or one with no ligand)
+        jobs = []
+        if ligands:
+            for lig in ligands:
+                job_name = f"{pdb_name}__{lig['id']}"
+                jobs.append((job_name, lig))
+        else:
+            jobs.append((pdb_name, None))
+
+        for job_name, lig in jobs:
+            cif_path = output_dir / f"{job_name}.cif"
+            if cif_path.exists():
+                names.append((job_name, "skipped"))
+                continue
+
+            molecules = [
+                {
+                    "id": "A",
+                    "type": "protein",
+                    "sequence": sequence,
+                }
+            ]
+            if homodimer:
+                molecules.append({
+                    "id": "B",
+                    "type": "protein",
+                    "sequence": sequence,
+                })
+            if lig:
+                molecules.append({
+                    "id": "L",
+                    "type": "ligand",
+                    "smiles": lig["smiles"],
+                })
+            names.append((job_name, None))
+            items.append({"molecules": molecules})
 
     # Nothing to submit (all skipped)
     if not items:
@@ -113,7 +140,7 @@ def _fold_batch(records, output_dir, pad_width, api_key, truncate=None, homodime
     return final
 
 
-def fold_sequences_with_boltz2(fasta_path, api_key, max_workers=4, batch_size=2, truncate=None, homodimer=False):
+def fold_sequences_with_boltz2(fasta_path, api_key, max_workers=4, batch_size=2, truncate=None, homodimer=False, ligand_file=None):
     """
     Fold all sequences in a FASTA file using BioLM Boltz2 API.
     Creates a directory named after the FASTA file to store PDB outputs.
@@ -121,8 +148,14 @@ def fold_sequences_with_boltz2(fasta_path, api_key, max_workers=4, batch_size=2,
     fasta_path = Path(fasta_path)
     fasta_name = fasta_path.stem
     suffix = "_dimer" if homodimer else ""
+    if ligand_file:
+        suffix += "_ligands"
     output_dir = fasta_path.parent / f"boltz2_pdbs_{fasta_name}{suffix}"
     output_dir.mkdir(exist_ok=True)
+
+    ligands = _load_ligands(ligand_file) if ligand_file else None
+    if ligands:
+        print(f"Loaded {len(ligands)} ligands: {', '.join(l['id'] for l in ligands)}")
 
     # First pass to determine max step number for padding
     max_step = 0
@@ -134,13 +167,15 @@ def fold_sequences_with_boltz2(fasta_path, api_key, max_workers=4, batch_size=2,
 
     # Collect records and split into batches
     records = list(SeqIO.parse(fasta_path, "fasta"))
+    n_jobs = len(records) * (len(ligands) if ligands else 1)
     batches = [records[i:i + batch_size] for i in range(0, len(records), batch_size)]
-    print(f"Folding {len(records)} sequences in {len(batches)} batches "
-          f"(batch_size={batch_size}, workers={max_workers})...")
+    print(f"Folding {n_jobs} jobs ({len(records)} sequences"
+          f"{f' x {len(ligands)} ligands' if ligands else ''}) "
+          f"in {len(batches)} batches (batch_size={batch_size}, workers={max_workers})...")
 
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
         futures = {
-            pool.submit(_fold_batch, batch, output_dir, pad_width, api_key, truncate, homodimer): batch
+            pool.submit(_fold_batch, batch, output_dir, pad_width, api_key, truncate, homodimer, ligands): batch
             for batch in batches
         }
         for future in as_completed(futures):
@@ -167,6 +202,8 @@ if __name__ == "__main__":
                         help='Truncate sequences longer than this many residues')
     parser.add_argument('--homodimer', action='store_true',
                         help='Add a second copy of each protein as molecule B')
+    parser.add_argument('--ligands', type=str, default=None,
+                        help='CSV file with ligands (columns: id, smiles)')
 
     args = parser.parse_args()
 
@@ -177,4 +214,5 @@ if __name__ == "__main__":
         batch_size=args.batch_size,
         truncate=args.truncate,
         homodimer=args.homodimer,
+        ligand_file=args.ligands,
     )
