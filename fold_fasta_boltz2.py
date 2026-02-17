@@ -148,14 +148,18 @@ def fold_sequences_with_boltz2(fasta_path, api_key, max_workers=4, truncate=None
             pool.submit(_fold_one, job_name, molecules, output_dir, api_key): job_name
             for job_name, molecules in jobs
         }
+        total = len(futures)
+        completed = 0
         for future in as_completed(futures):
+            completed += 1
             name, status = future.result()
+            tag = f"[{completed}/{total}]"
             if status == "skipped":
-                print(f"Skipping {name} - already exists")
+                print(f"{tag} Skipping {name} - already exists")
             elif status.startswith("ok"):
-                print(f"Successfully saved {name}.cif  {status}")
+                print(f"{tag} Successfully saved {name}.cif  {status}")
             else:
-                print(f"Error folding {name}: {status}")
+                print(f"{tag} Error folding {name}: {status}")
 
 
 if __name__ == "__main__":
