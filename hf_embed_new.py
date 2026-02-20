@@ -512,7 +512,8 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                       batch_size=batch_size,
                       shuffle=False,
                       collate_fn=collate,
-                      pin_memory=False)
+                      pin_memory=True,
+                      num_workers=4)
     start = time.time()
 
     # Need to concatenate output of each chunk
@@ -594,8 +595,10 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     output_hs_needed = get_aa_embeddings or get_sequence_embeddings # Check if hidden states are needed at all
 
     # Main embedding loop
-    with torch.inference_mode():
+    with torch.no_grad():
         for i, data in enumerate(data_loader): # Add enumerate for batch index
+            if i%10 ==0:
+               print(i)
             batch_size_actual = data['input_ids'].shape[0] # Use actual batch size
             batch_seqlens = seqlens[count:count+batch_size_actual]
 
