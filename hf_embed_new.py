@@ -414,18 +414,16 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     print("device_ids", device_ids)
     model = model.eval()
 
-    # Send model to the correct device, wrapping in DataParallel if multiple GPUs available
+    # Send model to the correct device
+    # Note: DataParallel is not used for inference as it conflicts with no_grad/inference_mode
+    # due to a PyTorch bug where detach=True is passed to NCCL broadcast during replication.
+    # For embedding, a single GPU is sufficient and avoids the overhead of gather/scatter.
     if cpu_only:
         print("Embedding on cpu, even though gpu available")
         model = model.to('cpu')
-    elif torch.cuda.device_count() > 1:
-        print("Let's use", torch.cuda.device_count(), "GPUs!")
-        if not isinstance(model, nn.DataParallel):
-            model = nn.DataParallel(model, device_ids=device_ids).to(device)
-        else:
-            print("Model already wrapped in DataParallel.")
-            model = model.to(device)
     else:
+        if torch.cuda.device_count() > 1:
+            print(f"{torch.cuda.device_count()} GPUs detected, but using cuda:0 only for inference (DataParallel incompatible with no_grad)")
         print(f"Moving model to {device}")
         model = model.to(device)
 
