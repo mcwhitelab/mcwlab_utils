@@ -165,10 +165,10 @@ def get_model_config_attributes(model_path):
 
 
 
-def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 1, max_length = None, subsample = None):
+def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 1, max_length = None, subsample = None, model_type = None):
     '''
     Load a fasta of protein sequences and
-    add a space between each amino acid in sequence (needed to compute embeddings)
+    add a space between each amino acid in sequence (needed for T5-based models)
     Takes:
         str: Path of the fasta file
         truncate (int): Length to truncate all sequences to (based on model's max length)
@@ -176,9 +176,18 @@ def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 
         minlength (int): Minimum sequence length to include
         max_length (int): Optional maximum sequence length - sequences longer than this are dropped
         subsample (int): Optional number of sequences to randomly subsample before embedding
+        model_type (str): Model type - only T5 requires space-separated sequences
     Returns:
-        [ids], [sequences], [sequences with spaces and any padding]
+        [ids], [sequences], [sequences formatted for tokenization (space-separated for T5, raw strings for ESM/BERT etc.)]
     '''
+    # Only T5/ProtTrans models need space-separated sequences
+    # ESM, ESMplusplus, BERT etc. tokenize raw sequences directly
+    needs_spaces = model_type == "t5"
+    if needs_spaces:
+        print("T5 model detected: sequences will be space-separated for tokenization")
+    else:
+        print(f"Model type '{model_type}': sequences will be passed as raw strings (no spaces)")
+
     sequences = []
     sequences_spaced = []
     ids = []
@@ -204,9 +213,12 @@ def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 
             pad_string = "X" * padding
             seq = f"{pad_string}{seq}{pad_string}"
 
-        seq_spaced = " ".join(seq)
+        if needs_spaces:
+            seq_formatted = " ".join(seq)
+        else:
+            seq_formatted = str(seq)
         ids.append(record.id)
-        sequences_spaced.append(seq_spaced)
+        sequences_spaced.append(seq_formatted)
 
     if subsample is not None and subsample < len(sequences):
         print(f"Subsampling {subsample} sequences from {len(sequences)} total")
@@ -433,8 +445,8 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     model = model.eval()
 
     # Send model to the correct device
-    # Note: DataParallel is not used for inference as it conflicts with no_grad/inference_mode
-    # due to a PyTorch bug where detach=True is passed to NCCL broadcast during replication.
+    # Note: DataParallel is not used for inference as it conflicts with torch.inference_mode()
+    # due to a PyTorch bug (NCCL Error 5) where detach=True is passed to NCCL broadcast during replication.
     # For embedding, a single GPU is sufficient and avoids the overhead of gather/scatter.
     if cpu_only:
         print("Embedding on cpu, even though gpu available")
@@ -868,7 +880,8 @@ if __name__ == "__main__":
                                                            truncate=truncate_len,
                                                            padding=padding,
                                                            max_length=max_length,
-                                                           subsample=subsample)
+                                                           subsample=subsample,
+                                                           model_type=model_config_attrs.get("model_type"))
 
     if not sequences:
         print("Error: No valid sequences loaded from FASTA file after filtering/truncation. Exiting.")
