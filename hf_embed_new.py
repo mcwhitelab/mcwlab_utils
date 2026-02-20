@@ -12,6 +12,7 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import gc
 import time
+import traceback
 from model.architectures import SWE_Pooling
 
 
@@ -413,27 +414,20 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     print("device_ids", device_ids)
     model = model.eval()
 
-    # Send model to the correct device if not already there
-    # Check if model is already on the target device
-    current_device = next(model.parameters()).device
-    if current_device != device:
-         if torch.cuda.device_count() > 1 and not cpu_only:
-             print("Let's use", torch.cuda.device_count(), "GPUs!")
-             # Check if model is already DataParallel
-             if not isinstance(model, nn.DataParallel):
-                  model = nn.DataParallel(model, device_ids=device_ids).to(device) # Send to CUDA
-             else:
-                  print("Model already wrapped in DataParallel.")
-                  model = model.to(device) # Ensure it's on the primary CUDA device if multi-GPU
-         else:
-             if cpu_only:
-                 print("Embedding on cpu, even though gpu available")
-                 model = model.to('cpu')
-             else:
-                  print(f"Moving model to {device}")
-                  model = model.to(device)
+    # Send model to the correct device, wrapping in DataParallel if multiple GPUs available
+    if cpu_only:
+        print("Embedding on cpu, even though gpu available")
+        model = model.to('cpu')
+    elif torch.cuda.device_count() > 1:
+        print("Let's use", torch.cuda.device_count(), "GPUs!")
+        if not isinstance(model, nn.DataParallel):
+            model = nn.DataParallel(model, device_ids=device_ids).to(device)
+        else:
+            print("Model already wrapped in DataParallel.")
+            model = model.to(device)
     else:
-        print(f"Model already on device: {current_device}")
+        print(f"Moving model to {device}")
+        model = model.to(device)
 
 
     hooked_activations = []
@@ -679,6 +673,7 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
 
             except Exception as e:
                 print(f"Error processing hidden states for batch starting at {count}: {e}")
+                traceback.print_exc()
                 count += batch_size_actual
                 continue # Skip batch
 
