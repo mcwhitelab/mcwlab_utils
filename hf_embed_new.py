@@ -59,6 +59,10 @@ def get_embed_args():
                         help="If --cpu_only flag is included, will run on cpu even if gpu available")
     parser.add_argument("-b", "--batch_size", dest = "batch_size", type = int, default = 1,
                         help="Batch size for processing sequences. Default: 1")
+    parser.add_argument("-ml", "--max_length", dest = "max_length", type = int, required = False,
+                        help="Optional: Drop sequences longer than this length (sequences are excluded, not truncated)")
+    parser.add_argument("-n", "--subsample", dest = "subsample", type = int, required = False,
+                        help="Optional: Randomly subsample to n sequences before embedding")
     args = parser.parse_args()
     
     return(args)
@@ -161,7 +165,7 @@ def get_model_config_attributes(model_path):
 
 
 
-def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 1):
+def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 1, max_length = None, subsample = None):
     '''
     Load a fasta of protein sequences and
     add a space between each amino acid in sequence (needed to compute embeddings)
@@ -170,6 +174,8 @@ def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 
         truncate (int): Length to truncate all sequences to (based on model's max length)
         padding (int): Optional padding to add to each sequence
         minlength (int): Minimum sequence length to include
+        max_length (int): Optional maximum sequence length - sequences longer than this are dropped
+        subsample (int): Optional number of sequences to randomly subsample before embedding
     Returns:
         [ids], [sequences], [sequences with spaces and any padding]
     '''
@@ -189,6 +195,10 @@ def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 
             print(f"Skipping sequence {record.id} with length {len(seq)} < {minlength}")
             continue
 
+        if max_length is not None and len(seq) > max_length:
+            print(f"Skipping sequence {record.id} with length {len(seq)} > max_length {max_length}")
+            continue
+
         sequences.append(seq)
         if padding > 0:
             pad_string = "X" * padding
@@ -197,6 +207,14 @@ def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 
         seq_spaced = " ".join(seq)
         ids.append(record.id)
         sequences_spaced.append(seq_spaced)
+
+    if subsample is not None and subsample < len(sequences):
+        print(f"Subsampling {subsample} sequences from {len(sequences)} total")
+        indices = np.random.choice(len(sequences), size=subsample, replace=False)
+        indices = sorted(indices)
+        ids = [ids[i] for i in indices]
+        sequences = [sequences[i] for i in indices]
+        sequences_spaced = [sequences_spaced[i] for i in indices]
 
     if sequences:
         print(f"Loaded {len(sequences)} sequences")
@@ -772,6 +790,8 @@ if __name__ == "__main__":
     sequence_target_dim = args.sequence_target_dim
     batch_size = args.batch_size
     all_layers = args.all_layers
+    max_length = args.max_length
+    subsample = args.subsample
 
 
     if not any([get_sequence_embeddings, get_aa_embeddings, get_sequence_activations, get_aa_activations]):
@@ -843,10 +863,12 @@ if __name__ == "__main__":
 
 
     # Parse FASTA using the determined truncation length
-    print(f"Parsing FASTA file: {fasta_path} with truncation={truncate_len}, padding={padding}")
+    print(f"Parsing FASTA file: {fasta_path} with truncation={truncate_len}, padding={padding}, max_length={max_length}, subsample={subsample}")
     ids, sequences, sequences_spaced = parse_fasta_for_embed(fasta_path=fasta_path,
                                                            truncate=truncate_len,
-                                                           padding=padding)
+                                                           padding=padding,
+                                                           max_length=max_length,
+                                                           subsample=subsample)
 
     if not sequences:
         print("Error: No valid sequences loaded from FASTA file after filtering/truncation. Exiting.")
