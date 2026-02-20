@@ -186,18 +186,18 @@ def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 
     for record in SeqIO.parse(fasta_path, "fasta"):
         seq = record.seq
 
-        if truncate:
-            if len(seq) > truncate:
-                print(f"Warning: Truncating sequence {record.id} from length {len(seq)} to {truncate}")
-            seq = seq[0:truncate]
+        if max_length is not None and len(seq) > max_length:
+            print(f"Skipping sequence {record.id} with length {len(seq)} > max_length {max_length}")
+            continue
 
         if len(seq) < minlength:
             print(f"Skipping sequence {record.id} with length {len(seq)} < {minlength}")
             continue
 
-        if max_length is not None and len(seq) > max_length:
-            print(f"Skipping sequence {record.id} with length {len(seq)} > max_length {max_length}")
-            continue
+        if truncate:
+            if len(seq) > truncate:
+                print(f"Warning: Truncating sequence {record.id} from length {len(seq)} to {truncate}")
+            seq = seq[0:truncate]
 
         sequences.append(seq)
         if padding > 0:
