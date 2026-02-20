@@ -58,7 +58,7 @@ def get_embed_args():
     parser.add_argument("-co", "--cpu_only", dest = "cpu_only",  action = "store_true",
                         help="If --cpu_only flag is included, will run on cpu even if gpu available")
     parser.add_argument("-b", "--batch_size", dest = "batch_size", type = int, default = 1,
-                        help="Batch size for processing sequences. Default: 1")
+                        help="Batch size for processing sequences. Warning, check embedding fidelity if increasing. Default: 1")
     parser.add_argument("-ml", "--max_length", dest = "max_length", type = int, required = False,
                         help="Optional: Drop sequences longer than this length (sequences are excluded, not truncated)")
     parser.add_argument("-n", "--subsample", dest = "subsample", type = int, required = False,
@@ -595,7 +595,7 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     output_hs_needed = get_aa_embeddings or get_sequence_embeddings # Check if hidden states are needed at all
 
     # Main embedding loop
-    with torch.no_grad():
+    with torch.inference_mode():
         for i, data in enumerate(data_loader): # Add enumerate for batch index
             if i%10 ==0:
                print(i)
