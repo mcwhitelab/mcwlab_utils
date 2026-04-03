@@ -16,6 +16,14 @@ import traceback
 from model.architectures import SWE_Pooling
 
 
+import torch
+
+if hasattr(torch._dynamo.config, "cache_size_limit"):
+    torch._dynamo.config.cache_size_limit = 64
+elif hasattr(torch._dynamo.config, "recompile_limit"):
+    torch._dynamo.config.recompile_limit = 64
+
+
 np.random.seed(42)
 
 def get_embed_args():
@@ -832,23 +840,23 @@ if __name__ == "__main__":
 
     # Load model and get config attributes *once* upfront
     print(f"Loading model from: {model_path}")
-    try:
-        # Pass output_hidden_states based on whether any embedding type is requested
-        output_hs_needed_for_load = get_sequence_embeddings or get_aa_embeddings
-        model, tokenizer, model_config_attrs = load_model(
+    #try:
+    # Pass output_hidden_states based on whether any embedding type is requested
+    output_hs_needed_for_load = get_sequence_embeddings or get_aa_embeddings
+    model, tokenizer, model_config_attrs = load_model(
             model_path,
             output_hidden_states=output_hs_needed_for_load,
             output_attentions=False, # Assuming attentions are not needed based on args
             half=half_precision_requested # Request half if applicable
-        )
-        # Check the actual precision of the loaded model
-        half_precision_effective = next(model.parameters()).dtype == torch.float16
-        print(f"Model, tokenizer, and config loaded. Effective precision: {'half' if half_precision_effective else 'full'}")
+    )
+    # Check the actual precision of the loaded model
+    half_precision_effective = next(model.parameters()).dtype == torch.float16
+    print(f"Model, tokenizer, and config loaded. Effective precision: {'half' if half_precision_effective else 'full'}")
 
-    except Exception as e:
-        print(f"Fatal Error: Failed to load model, tokenizer, or config from {model_path}.")
-        print(f"Error details: {e}")
-        exit(1) # Ensure exit if loading fails
+    #except Exception as e:
+    #    print(f"Fatal Error: Failed to load model, tokenizer, or config from {model_path}.")
+    #    print(f"Error details: {e}")
+    #    exit(1) # Ensure exit if loading fails
 
     # --- Code below here only runs if load_model succeeded and variables are assigned ---
 
