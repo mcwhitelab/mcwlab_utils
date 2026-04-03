@@ -12,7 +12,16 @@ from torch.utils.data import Dataset, DataLoader
 import numpy as np
 import gc
 import time
+import traceback
 from model.architectures import SWE_Pooling
+
+
+import torch
+
+if hasattr(torch._dynamo.config, "cache_size_limit"):
+    torch._dynamo.config.cache_size_limit = 64
+elif hasattr(torch._dynamo.config, "recompile_limit"):
+    torch._dynamo.config.recompile_limit = 64
 
 
 np.random.seed(42)
@@ -57,7 +66,11 @@ def get_embed_args():
     parser.add_argument("-co", "--cpu_only", dest = "cpu_only",  action = "store_true",
                         help="If --cpu_only flag is included, will run on cpu even if gpu available")
     parser.add_argument("-b", "--batch_size", dest = "batch_size", type = int, default = 1,
-                        help="Batch size for processing sequences. Default: 1")
+                        help="Batch size for processing sequences. Warning, check embedding fidelity if increasing. Default: 1")
+    parser.add_argument("-ml", "--max_length", dest = "max_length", type = int, required = False,
+                        help="Optional: Drop sequences longer than this length (sequences are excluded, not truncated)")
+    parser.add_argument("-n", "--subsample", dest = "subsample", type = int, required = False,
+                        help="Optional: Randomly subsample to n sequences before embedding")
     args = parser.parse_args()
     
     return(args)
@@ -160,18 +173,29 @@ def get_model_config_attributes(model_path):
 
 
 
-def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 1):
+def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 1, max_length = None, subsample = None, model_type = None):
     '''
     Load a fasta of protein sequences and
-    add a space between each amino acid in sequence (needed to compute embeddings)
+    add a space between each amino acid in sequence (needed for T5-based models)
     Takes:
         str: Path of the fasta file
         truncate (int): Length to truncate all sequences to (based on model's max length)
         padding (int): Optional padding to add to each sequence
         minlength (int): Minimum sequence length to include
+        max_length (int): Optional maximum sequence length - sequences longer than this are dropped
+        subsample (int): Optional number of sequences to randomly subsample before embedding
+        model_type (str): Model type - only T5 requires space-separated sequences
     Returns:
-        [ids], [sequences], [sequences with spaces and any padding]
+        [ids], [sequences], [sequences formatted for tokenization (space-separated for T5, raw strings for ESM/BERT etc.)]
     '''
+    # Only T5/ProtTrans models need space-separated sequences
+    # ESM, ESMplusplus, BERT etc. tokenize raw sequences directly
+    needs_spaces = model_type == "t5"
+    if needs_spaces:
+        print("T5 model detected: sequences will be space-separated for tokenization")
+    else:
+        print(f"Model type '{model_type}': sequences will be passed as raw strings (no spaces)")
+
     sequences = []
     sequences_spaced = []
     ids = []
@@ -179,23 +203,38 @@ def parse_fasta_for_embed(fasta_path, truncate = None, padding = 0, minlength = 
     for record in SeqIO.parse(fasta_path, "fasta"):
         seq = record.seq
 
-        if truncate:
-            if len(seq) > truncate:
-                print(f"Warning: Truncating sequence {record.id} from length {len(seq)} to {truncate}")
-            seq = seq[0:truncate]
+        if max_length is not None and len(seq) > max_length:
+            print(f"Skipping sequence {record.id} with length {len(seq)} > max_length {max_length}")
+            continue
 
         if len(seq) < minlength:
             print(f"Skipping sequence {record.id} with length {len(seq)} < {minlength}")
             continue
+
+        if truncate:
+            if len(seq) > truncate:
+                print(f"Warning: Truncating sequence {record.id} from length {len(seq)} to {truncate}")
+            seq = seq[0:truncate]
 
         sequences.append(seq)
         if padding > 0:
             pad_string = "X" * padding
             seq = f"{pad_string}{seq}{pad_string}"
 
-        seq_spaced = " ".join(seq)
+        if needs_spaces:
+            seq_formatted = " ".join(seq)
+        else:
+            seq_formatted = str(seq)
         ids.append(record.id)
-        sequences_spaced.append(seq_spaced)
+        sequences_spaced.append(seq_formatted)
+
+    if subsample is not None and subsample < len(sequences):
+        print(f"Subsampling {subsample} sequences from {len(sequences)} total")
+        indices = np.random.choice(len(sequences), size=subsample, replace=False)
+        indices = sorted(indices)
+        ids = [ids[i] for i in indices]
+        sequences = [sequences[i] for i in indices]
+        sequences_spaced = [sequences_spaced[i] for i in indices]
 
     if sequences:
         print(f"Loaded {len(sequences)} sequences")
@@ -213,7 +252,6 @@ def retrieve_aa_embeddings(model_output, model_type, layers=None, padding=0, seq
     '''
     # Get all hidden states
     hidden_states = model_output.hidden_states
-    print("hidden_states", hidden_states)
     # Handle different model types
     if model_type == "protst":
         # For ProtST, hidden_states is already the last layer's tensor
@@ -414,27 +452,18 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     print("device_ids", device_ids)
     model = model.eval()
 
-    # Send model to the correct device if not already there
-    # Check if model is already on the target device
-    current_device = next(model.parameters()).device
-    if current_device != device:
-         if torch.cuda.device_count() > 1 and not cpu_only:
-             print("Let's use", torch.cuda.device_count(), "GPUs!")
-             # Check if model is already DataParallel
-             if not isinstance(model, nn.DataParallel):
-                  model = nn.DataParallel(model, device_ids=device_ids).to(device) # Send to CUDA
-             else:
-                  print("Model already wrapped in DataParallel.")
-                  model = model.to(device) # Ensure it's on the primary CUDA device if multi-GPU
-         else:
-             if cpu_only:
-                 print("Embedding on cpu, even though gpu available")
-                 model = model.to('cpu')
-             else:
-                  print(f"Moving model to {device}")
-                  model = model.to(device)
+    # Send model to the correct device
+    # Note: DataParallel is not used for inference as it conflicts with torch.inference_mode()
+    # due to a PyTorch bug (NCCL Error 5) where detach=True is passed to NCCL broadcast during replication.
+    # For embedding, a single GPU is sufficient and avoids the overhead of gather/scatter.
+    if cpu_only:
+        print("Embedding on cpu, even though gpu available")
+        model = model.to('cpu')
     else:
-        print(f"Model already on device: {current_device}")
+        if torch.cuda.device_count() > 1:
+            print(f"{torch.cuda.device_count()} GPUs detected, but using cuda:0 only for inference (DataParallel incompatible with no_grad)")
+        print(f"Moving model to {device}")
+        model = model.to(device)
 
 
     hooked_activations = []
@@ -491,7 +520,8 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                       batch_size=batch_size,
                       shuffle=False,
                       collate_fn=collate,
-                      pin_memory=False)
+                      pin_memory=True,
+                      num_workers=4)
     start = time.time()
 
     # Need to concatenate output of each chunk
@@ -575,6 +605,8 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     # Main embedding loop
     with torch.inference_mode():
         for i, data in enumerate(data_loader): # Add enumerate for batch index
+            if i%10 ==0:
+               print(i)
             batch_size_actual = data['input_ids'].shape[0] # Use actual batch size
             batch_seqlens = seqlens[count:count+batch_size_actual]
 
@@ -600,7 +632,6 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                 else: # General case for T5EncoderModel, AutoModel, etc.
                      output_hs = get_aa_embeddings or get_sequence_embeddings
                      model_output = model(**inputs, output_hidden_states=output_hs)
-                     print(model_output) 
 
                 # Ensure model_output.hidden_states is not None before proceeding
                 if not hasattr(model_output, 'hidden_states') or model_output.hidden_states is None:
@@ -681,6 +712,7 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
 
             except Exception as e:
                 print(f"Error processing hidden states for batch starting at {count}: {e}")
+                traceback.print_exc()
                 count += batch_size_actual
                 continue # Skip batch
 
@@ -781,6 +813,8 @@ if __name__ == "__main__":
     sequence_target_dim = args.sequence_target_dim
     batch_size = args.batch_size
     all_layers = args.all_layers
+    max_length = args.max_length
+    subsample = args.subsample
 
 
     if not any([get_sequence_embeddings, get_aa_embeddings, get_sequence_activations, get_aa_activations]):
@@ -806,23 +840,23 @@ if __name__ == "__main__":
 
     # Load model and get config attributes *once* upfront
     print(f"Loading model from: {model_path}")
-    try:
-        # Pass output_hidden_states based on whether any embedding type is requested
-        output_hs_needed_for_load = get_sequence_embeddings or get_aa_embeddings
-        model, tokenizer, model_config_attrs = load_model(
+    #try:
+    # Pass output_hidden_states based on whether any embedding type is requested
+    output_hs_needed_for_load = get_sequence_embeddings or get_aa_embeddings
+    model, tokenizer, model_config_attrs = load_model(
             model_path,
             output_hidden_states=output_hs_needed_for_load,
             output_attentions=False, # Assuming attentions are not needed based on args
             half=half_precision_requested # Request half if applicable
-        )
-        # Check the actual precision of the loaded model
-        half_precision_effective = next(model.parameters()).dtype == torch.float16
-        print(f"Model, tokenizer, and config loaded. Effective precision: {'half' if half_precision_effective else 'full'}")
+    )
+    # Check the actual precision of the loaded model
+    half_precision_effective = next(model.parameters()).dtype == torch.float16
+    print(f"Model, tokenizer, and config loaded. Effective precision: {'half' if half_precision_effective else 'full'}")
 
-    except Exception as e:
-        print(f"Fatal Error: Failed to load model, tokenizer, or config from {model_path}.")
-        print(f"Error details: {e}")
-        exit(1) # Ensure exit if loading fails
+    #except Exception as e:
+    #    print(f"Fatal Error: Failed to load model, tokenizer, or config from {model_path}.")
+    #    print(f"Error details: {e}")
+    #    exit(1) # Ensure exit if loading fails
 
     # --- Code below here only runs if load_model succeeded and variables are assigned ---
 
@@ -852,10 +886,13 @@ if __name__ == "__main__":
 
 
     # Parse FASTA using the determined truncation length
-    print(f"Parsing FASTA file: {fasta_path} with truncation={truncate_len}, padding={padding}")
+    print(f"Parsing FASTA file: {fasta_path} with truncation={truncate_len}, padding={padding}, max_length={max_length}, subsample={subsample}")
     ids, sequences, sequences_spaced = parse_fasta_for_embed(fasta_path=fasta_path,
                                                            truncate=truncate_len,
-                                                           padding=padding)
+                                                           padding=padding,
+                                                           max_length=max_length,
+                                                           subsample=subsample,
+                                                           model_type=model_config_attrs.get("model_type"))
 
     if not sequences:
         print("Error: No valid sequences loaded from FASTA file after filtering/truncation. Exiting.")
