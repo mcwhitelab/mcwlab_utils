@@ -36,8 +36,8 @@ def get_embed_args():
     parser.add_argument("-o", "--outpickle", dest = "pkl_out", type = str, required = False,
                         help="Optional: output .pkl filename to save embeddings in")
     parser.add_argument("-ss", "--strategy", dest = "strat", type = str, nargs="+", required = False, 
-                        default = ["meansig"], choices = ['swe', 'mean', 'meansig'],
-                        help="Embedding strategies to use. Can specify multiple: mean, meansig, swe. Default: meansig")
+                        default = ["meansig"], choices = ['swe', 'mean', 'meansig', 'maxpool'],
+                        help="Embedding strategies to use. Can specify multiple: mean, meansig, swe, maxpool. Default: meansig")
     parser.add_argument("-s", "--get_sequence_embeddings", dest = "get_sequence_embeddings", action = "store_true",
                         help="Flag: Whether to get sequence embeddings")
     parser.add_argument("-a", "--get_aa_embeddings", dest = "get_aa_embeddings", action = "store_true",
@@ -661,19 +661,17 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                 attention_mask = np.array(attention_mask)
 
                 if get_sequence_embeddings == True:
-                                            # Compute masked mean
-                    # Expand attention mask to match embedding dimensions
                     mask_expanded = attention_mask[..., None]  # Shape: [batch_size, seq_length, 1]
-                    # Mask out padding tokens and compute mean only over real tokens
-                    # Add epsilon to avoid division by zero if a sequence has zero length after masking
                     sum_mask = attention_mask.sum(axis=1, keepdims=True)
-                    masked_embeddings = aa_embeddings * mask_expanded
                     if model_type == "protst":
-
                         sequence_embeddings = np.array(protein_outputs.protein_feature.to("cpu"))
+                    elif "maxpool" in strat:
+                        masked_for_max = aa_embeddings.copy()
+                        masked_for_max[mask_expanded == 0] = -1e9
+                        sequence_embeddings = masked_for_max.max(axis=1)
                     else:
-
-                        sequence_embeddings = masked_embeddings.sum(axis=1) / (sum_mask + 1e-9) # Add epsilon
+                        masked_embeddings = aa_embeddings * mask_expanded
+                        sequence_embeddings = masked_embeddings.sum(axis=1) / (sum_mask + 1e-9)
                     sequence_array_list.append(sequence_embeddings)
 
                     if "meansig" in strat:
