@@ -29,6 +29,10 @@ This would compare:
 
 from transformers import AutoTokenizer, AutoModel, AutoConfig, T5Tokenizer, T5EncoderModel, AutoModelForMaskedLM, EsmTokenizer
 import torch
+import torch._dynamo
+torch._dynamo.config.suppress_errors = True
+
+
 import torch.nn as nn
 from Bio import SeqIO
 from Bio.Seq import Seq

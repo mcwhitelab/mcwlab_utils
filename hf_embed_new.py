@@ -16,6 +16,14 @@ import traceback
 from model.architectures import SWE_Pooling
 
 
+import torch
+
+if hasattr(torch._dynamo.config, "cache_size_limit"):
+    torch._dynamo.config.cache_size_limit = 64
+elif hasattr(torch._dynamo.config, "recompile_limit"):
+    torch._dynamo.config.recompile_limit = 64
+
+
 np.random.seed(42)
 
 def get_embed_args():
@@ -58,7 +66,7 @@ def get_embed_args():
     parser.add_argument("-co", "--cpu_only", dest = "cpu_only",  action = "store_true",
                         help="If --cpu_only flag is included, will run on cpu even if gpu available")
     parser.add_argument("-b", "--batch_size", dest = "batch_size", type = int, default = 1,
-                        help="Batch size for processing sequences. Default: 1")
+                        help="Batch size for processing sequences. Warning, check embedding fidelity if increasing. Default: 1")
     parser.add_argument("-ml", "--max_length", dest = "max_length", type = int, required = False,
                         help="Optional: Drop sequences longer than this length (sequences are excluded, not truncated)")
     parser.add_argument("-n", "--subsample", dest = "subsample", type = int, required = False,
@@ -512,7 +520,8 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                       batch_size=batch_size,
                       shuffle=False,
                       collate_fn=collate,
-                      pin_memory=False)
+                      pin_memory=True,
+                      num_workers=4)
     start = time.time()
 
     # Need to concatenate output of each chunk
@@ -597,6 +606,8 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     # Main embedding loop
     with torch.inference_mode():
         for i, data in enumerate(data_loader): # Add enumerate for batch index
+            if i%10 ==0:
+               print(i)
             batch_size_actual = data['input_ids'].shape[0] # Use actual batch size
             batch_seqlens = seqlens[count:count+batch_size_actual]
 
@@ -840,23 +851,23 @@ if __name__ == "__main__":
 
     # Load model and get config attributes *once* upfront
     print(f"Loading model from: {model_path}")
-    try:
-        # Pass output_hidden_states based on whether any embedding type is requested
-        output_hs_needed_for_load = get_sequence_embeddings or get_aa_embeddings
-        model, tokenizer, model_config_attrs = load_model(
+    #try:
+    # Pass output_hidden_states based on whether any embedding type is requested
+    output_hs_needed_for_load = get_sequence_embeddings or get_aa_embeddings
+    model, tokenizer, model_config_attrs = load_model(
             model_path,
             output_hidden_states=output_hs_needed_for_load,
             output_attentions=False, # Assuming attentions are not needed based on args
             half=half_precision_requested # Request half if applicable
-        )
-        # Check the actual precision of the loaded model
-        half_precision_effective = next(model.parameters()).dtype == torch.float16
-        print(f"Model, tokenizer, and config loaded. Effective precision: {'half' if half_precision_effective else 'full'}")
+    )
+    # Check the actual precision of the loaded model
+    half_precision_effective = next(model.parameters()).dtype == torch.float16
+    print(f"Model, tokenizer, and config loaded. Effective precision: {'half' if half_precision_effective else 'full'}")
 
-    except Exception as e:
-        print(f"Fatal Error: Failed to load model, tokenizer, or config from {model_path}.")
-        print(f"Error details: {e}")
-        exit(1) # Ensure exit if loading fails
+    #except Exception as e:
+    #    print(f"Fatal Error: Failed to load model, tokenizer, or config from {model_path}.")
+    #    print(f"Error details: {e}")
+    #    exit(1) # Ensure exit if loading fails
 
     # --- Code below here only runs if load_model succeeded and variables are assigned ---
 
