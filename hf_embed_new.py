@@ -666,7 +666,7 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                     if model_type == "protst":
                         sequence_embeddings = np.array(protein_outputs.protein_feature.to("cpu"))
                     elif "maxpool" in strat:
-                        sequence_embeddings = np.where(mask_expanded, aa_embeddings, -1e9).max(axis=1)
+                        sequence_embeddings = np.where(mask_expanded, aa_embeddings.astype(np.float32), -np.inf).max(axis=1)
                     else:
                         masked_embeddings = aa_embeddings * mask_expanded
                         sequence_embeddings = masked_embeddings.sum(axis=1) / (sum_mask + 1e-9)
