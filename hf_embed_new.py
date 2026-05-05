@@ -528,7 +528,6 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
     sequence_array_list = []
     sequence_array_swe_list = []
     sequence_sigma_array_list = []
-    sequence_array_maxpool_list = []
     aa_array_list = []
 
     if sequence_pcamatrix_pkl:
@@ -667,9 +666,7 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                     if model_type == "protst":
                         sequence_embeddings = np.array(protein_outputs.protein_feature.to("cpu"))
                     elif "maxpool" in strat:
-                        masked_for_max = aa_embeddings.copy()
-                        masked_for_max[mask_expanded == 0] = -1e9
-                        sequence_embeddings = masked_for_max.max(axis=1)
+                        sequence_embeddings = np.where(mask_expanded, aa_embeddings, -1e9).max(axis=1)
                     else:
                         masked_embeddings = aa_embeddings * mask_expanded
                         sequence_embeddings = masked_embeddings.sum(axis=1) / (sum_mask + 1e-9)
@@ -682,13 +679,6 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                         variance = squared_diff.sum(axis=1) / (sum_mask + 1e-9) # Add epsilon
                         sequence_embeddings_sigma = np.sqrt(variance)
                         sequence_sigma_array_list.append(sequence_embeddings_sigma)
-
-                    if "maxpool" in strat:
-                        # Set padding positions to large negative value so they don't win the max
-                        masked_for_max = aa_embeddings.copy()
-                        masked_for_max[mask_expanded == 0] = -1e9
-                        sequence_embeddings_max = masked_for_max.max(axis=1)
-                        sequence_array_maxpool_list.append(sequence_embeddings_max)
               
                 # --- SWE handling reverted fully to archive logic ---
                 if "swe" in strat and swe_model is not None:
@@ -787,9 +777,6 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
             if "swe" in strat:
                 if sequence_array_swe_list: # Check if swe was computed
                     embedding_dict['sequence_embeddings_swe'] = np.concatenate(sequence_array_swe_list)
-            if "maxpool" in strat:
-                if sequence_array_maxpool_list:
-                    embedding_dict['sequence_embeddings_maxpool'] = np.concatenate(sequence_array_maxpool_list)
 
     if get_aa_embeddings == True:
         if aa_array_list:  # Check if we have any embeddings
@@ -983,7 +970,7 @@ if __name__ == "__main__":
                 pOut.write("Output objects and dimensions:\n")
 
                 # Add shapes safely using .get() on embedding_dict
-                for key in ['aa_activations', 'sequence_activations', 'sequence_embeddings', 'sequence_embeddings_sigma', 'sequence_embeddings_swe', 'sequence_embeddings_maxpool', 'aa_embeddings']:
+                for key in ['aa_activations', 'sequence_activations', 'sequence_embeddings', 'sequence_embeddings_sigma', 'sequence_embeddings_swe', 'aa_embeddings']:
                     data = embedding_dict.get(key)
                     if data is not None:
                         try:
