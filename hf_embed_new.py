@@ -63,6 +63,9 @@ def get_embed_args():
                         help="Which layers to use for embeddings, default: -1 (last layer). Use 'all' for all layers.")
     parser.add_argument("--all_layers", dest = "all_layers", action = "store_true",
                         help="Use all available layers for embeddings")
+    parser.add_argument("--aa_trim", dest = "aa_trim", type = str, default = "none",
+                        choices = ["none", "max_length", "per_sequence"],
+                        help="How to trim aa embeddings along sequence dimension. 'none': pad to model max (default, backward compatible). 'max_length': trim all to longest sequence in dataset, uniform 3D array. 'per_sequence': list of 2D arrays trimmed to each sequence's actual length.")
     parser.add_argument("-co", "--cpu_only", dest = "cpu_only",  action = "store_true",
                         help="If --cpu_only flag is included, will run on cpu even if gpu available")
     parser.add_argument("-b", "--batch_size", dest = "batch_size", type = int, default = 1,
@@ -417,7 +420,7 @@ class ListDataset(Dataset):
 
 
 
-def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_embeddings = True, get_aa_embeddings = True, get_sequence_activations = False, get_aa_activations = False, padding = 0, aa_pcamatrix_pkl = None, sequence_pcamatrix_pkl = None, layers = None, all_layers = False, strat=["meansig"], cpu_only = False, half = False, batch_size = 1):
+def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_embeddings = True, get_aa_embeddings = True, get_sequence_activations = False, get_aa_activations = False, padding = 0, aa_pcamatrix_pkl = None, sequence_pcamatrix_pkl = None, layers = None, all_layers = False, strat=["meansig"], cpu_only = False, half = False, batch_size = 1, aa_trim = "none"):
     '''
     Encode sequences with a pre-loaded transformer model
 
@@ -601,6 +604,7 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
 
     count = 0
     output_hs_needed = get_aa_embeddings or get_sequence_embeddings # Check if hidden states are needed at all
+    global_max_seqlen = max(seqlens) if seqlens else 0
 
     # Main embedding loop
     with torch.inference_mode():
@@ -702,6 +706,12 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
 
                 # Append AA embeddings if requested
                 if get_aa_embeddings == True and aa_embeddings is not None:
+                    if aa_trim == "per_sequence":
+                        for i in range(aa_embeddings.shape[0]):
+                            aa_array_list.append(aa_embeddings[i, :batch_seqlens[i], :])
+                    elif aa_trim == "max_length":
+                        aa_array_list.append(aa_embeddings[:, :global_max_seqlen, :])
+                    else:
                         aa_array_list.append(aa_embeddings)
 
                 count += batch_size_actual # Increment by actual batch size processed
@@ -780,7 +790,10 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
 
     if get_aa_embeddings == True:
         if aa_array_list:  # Check if we have any embeddings
-            embedding_dict['aa_embeddings'] = np.concatenate(aa_array_list)
+            if aa_trim == "per_sequence":
+                embedding_dict['aa_embeddings'] = aa_array_list  # list of 2D arrays [seqlen_i, hidden]
+            else:
+                embedding_dict['aa_embeddings'] = np.concatenate(aa_array_list)
 
     print("Complete")
     return(embedding_dict)
@@ -920,7 +933,8 @@ if __name__ == "__main__":
         strat=strat,
         cpu_only=cpu_only, # Pass CPU flag
         half=half_precision_effective, # Pass effective half precision status
-        batch_size=batch_size
+        batch_size=batch_size,
+        aa_trim=args.aa_trim
     )
 
 
