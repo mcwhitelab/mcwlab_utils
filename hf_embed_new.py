@@ -1,6 +1,6 @@
 from transformers import AutoTokenizer, AutoModel, AutoConfig, T5Tokenizer, T5EncoderModel, AutoModelForMaskedLM, EsmTokenizer
 
-from pca_embeddings import control_pca, load_pcamatrix, apply_pca
+#from pca_embeddings import control_pca, load_pcamatrix, apply_pca
 
 from transformers.models.t5.modeling_t5 import T5LayerFF
 import torch
@@ -601,12 +601,11 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
 
     count = 0
     output_hs_needed = get_aa_embeddings or get_sequence_embeddings # Check if hidden states are needed at all
-
     # Main embedding loop
     with torch.inference_mode():
         for i, data in enumerate(data_loader): # Add enumerate for batch index
             if i%10 ==0:
-               print(i)
+               print(i*10)
             batch_size_actual = data['input_ids'].shape[0] # Use actual batch size
             batch_seqlens = seqlens[count:count+batch_size_actual]
 
@@ -703,7 +702,6 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                 if aa_pcamatrix_pkl:
                     if aa_embeddings is not None and aa_embeddings.size > 0:
                        aa_embeddings = np.apply_along_axis(apply_pca, 2, aa_embeddings, aa_pcamatrix, aa_bias)
-
                 # Append AA embeddings if requested
                 if get_aa_embeddings == True and aa_embeddings is not None:
                         aa_array_list.append(aa_embeddings)
@@ -900,7 +898,6 @@ if __name__ == "__main__":
 
     print(f"Sequences parsed. Number of sequences: {len(ids)}")
     seqlens = [len(s) for s in sequences] # Get original lengths *after* truncation but *before* spacing/padding
-
 
     # Call the modified get_embeddings function
     print("Starting embedding generation...")
