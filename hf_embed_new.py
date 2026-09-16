@@ -36,8 +36,8 @@ def get_embed_args():
     parser.add_argument("-o", "--outpickle", dest = "pkl_out", type = str, required = False,
                         help="Optional: output .pkl filename to save embeddings in")
     parser.add_argument("-ss", "--strategy", dest = "strat", type = str, nargs="+", required = False, 
-                        default = ["meansig"], choices = ['swe', 'mean', 'meansig'],
-                        help="Embedding strategies to use. Can specify multiple: mean, meansig, swe. Default: meansig")
+                        default = ["meansig"], choices = ['swe', 'mean', 'meansig', 'maxpool'],
+                        help="Embedding strategies to use. Can specify multiple: mean, meansig, swe, maxpool. Default: meansig")
     parser.add_argument("-s", "--get_sequence_embeddings", dest = "get_sequence_embeddings", action = "store_true",
                         help="Flag: Whether to get sequence embeddings")
     parser.add_argument("-a", "--get_aa_embeddings", dest = "get_aa_embeddings", action = "store_true",
@@ -63,6 +63,9 @@ def get_embed_args():
                         help="Which layers to use for embeddings, default: -1 (last layer). Use 'all' for all layers.")
     parser.add_argument("--all_layers", dest = "all_layers", action = "store_true",
                         help="Use all available layers for embeddings")
+    parser.add_argument("--aa_trim", dest = "aa_trim", type = str, default = "none",
+                        choices = ["none", "max_length", "per_sequence"],
+                        help="How to trim aa embeddings along sequence dimension. 'none': pad to model max (default, backward compatible). 'max_length': trim all to longest sequence in dataset, uniform 3D array. 'per_sequence': list of 2D arrays trimmed to each sequence's actual length.")
     parser.add_argument("-co", "--cpu_only", dest = "cpu_only",  action = "store_true",
                         help="If --cpu_only flag is included, will run on cpu even if gpu available")
     parser.add_argument("-b", "--batch_size", dest = "batch_size", type = int, default = 1,
@@ -417,7 +420,7 @@ class ListDataset(Dataset):
 
 
 
-def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_embeddings = True, get_aa_embeddings = True, get_sequence_activations = False, get_aa_activations = False, padding = 0, aa_pcamatrix_pkl = None, sequence_pcamatrix_pkl = None, layers = None, all_layers = False, strat=["meansig"], cpu_only = False, half = False, batch_size = 1):
+def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_embeddings = True, get_aa_embeddings = True, get_sequence_activations = False, get_aa_activations = False, padding = 0, aa_pcamatrix_pkl = None, sequence_pcamatrix_pkl = None, layers = None, all_layers = False, strat=["meansig"], cpu_only = False, half = False, batch_size = 1, aa_trim = "none"):
     '''
     Encode sequences with a pre-loaded transformer model
 
@@ -660,19 +663,15 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                 attention_mask = np.array(attention_mask)
 
                 if get_sequence_embeddings == True:
-                                            # Compute masked mean
-                    # Expand attention mask to match embedding dimensions
                     mask_expanded = attention_mask[..., None]  # Shape: [batch_size, seq_length, 1]
-                    # Mask out padding tokens and compute mean only over real tokens
-                    # Add epsilon to avoid division by zero if a sequence has zero length after masking
                     sum_mask = attention_mask.sum(axis=1, keepdims=True)
-                    masked_embeddings = aa_embeddings * mask_expanded
                     if model_type == "protst":
-
                         sequence_embeddings = np.array(protein_outputs.protein_feature.to("cpu"))
+                    elif "maxpool" in strat:
+                        sequence_embeddings = np.where(mask_expanded, aa_embeddings.astype(np.float32), -np.inf).max(axis=1)
                     else:
-
-                        sequence_embeddings = masked_embeddings.sum(axis=1) / (sum_mask + 1e-9) # Add epsilon
+                        masked_embeddings = aa_embeddings * mask_expanded
+                        sequence_embeddings = masked_embeddings.sum(axis=1) / (sum_mask + 1e-9)
                     sequence_array_list.append(sequence_embeddings)
 
                     if "meansig" in strat:
@@ -704,6 +703,12 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
                        aa_embeddings = np.apply_along_axis(apply_pca, 2, aa_embeddings, aa_pcamatrix, aa_bias)
                 # Append AA embeddings if requested
                 if get_aa_embeddings == True and aa_embeddings is not None:
+                    if aa_trim == "per_sequence":
+                        for i in range(aa_embeddings.shape[0]):
+                            aa_array_list.append(aa_embeddings[i, :batch_seqlens[i], :])
+                    elif aa_trim == "max_length":
+                        aa_array_list.append(aa_embeddings[:, :global_max_seqlen, :])
+                    else:
                         aa_array_list.append(aa_embeddings)
 
                 count += batch_size_actual # Increment by actual batch size processed
@@ -782,7 +787,10 @@ def get_embeddings(model, tokenizer, config_attrs, seqs, seqlens, get_sequence_e
 
     if get_aa_embeddings == True:
         if aa_array_list:  # Check if we have any embeddings
-            embedding_dict['aa_embeddings'] = np.concatenate(aa_array_list)
+            if aa_trim == "per_sequence":
+                embedding_dict['aa_embeddings'] = aa_array_list  # list of 2D arrays [seqlen_i, hidden]
+            else:
+                embedding_dict['aa_embeddings'] = np.concatenate(aa_array_list)
 
     print("Complete")
     return(embedding_dict)
@@ -921,7 +929,8 @@ if __name__ == "__main__":
         strat=strat,
         cpu_only=cpu_only, # Pass CPU flag
         half=half_precision_effective, # Pass effective half precision status
-        batch_size=batch_size
+        batch_size=batch_size,
+        aa_trim=args.aa_trim
     )
 
 
